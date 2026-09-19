@@ -199,7 +199,7 @@ cython_debug/
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
@@ -216,3 +216,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==============================================================================
+# 42 Subject Requirements: Do not commit data, model weights, or generated outputs
+# ==============================================================================
+
+# Data directories (raw sources, datasets, indices, and output)
+data/
+output/
+results/
+moulinette/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Model weights, embeddings, local LLM checkpoints, and ML caches
+models/
+weights/
+checkpoints/
+.cache/
+hf_cache/
+huggingface/
+
+# Subject PDF and extracted temporary files
+*.pdf
+subject_extracted.txt
