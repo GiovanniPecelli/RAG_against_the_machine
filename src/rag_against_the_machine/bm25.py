@@ -10,11 +10,12 @@ score of a document (chunk D) given a search query (Q = [q_1, q_2, ..., q_m]).
 1. The Scoring Formula:
    For a query Q and a document D:
    
-                                           f(q_i, D) * (k1 + 1)
-Score(D, Q) = SUM [ IDF(q_i) * --------------------------------------------- ]
-             i                  f(q_i, D) + k1 * (1 - b + b * (|D| / avgdl))
+                  /                        f(q_i, D) * (k1 + 1)              \
+Score(D, Q) = SUM | IDF(q_i) * --------------------------------------------- |
+               i  \             f(q_i, D) + k1 * (1 - b + b * (|D| / avgdl)) /
 
    Where:
+   - i          : Mean that the result is a SUM of every word's in the query
    - q_i        : The i-th term (word) in the query.
    - f(q_i, D)  : Term Frequency (TF) — how many times q_i appears in chunk D.
    - |D|        : Document length — total number of words in chunk D.
@@ -32,13 +33,14 @@ Score(D, Q) = SUM [ IDF(q_i) * --------------------------------------------- ]
 2. Inverse Document Frequency (IDF) Formula:
    Measures the rarity of a term across all documents:
 
-                         N - n(q_i) + 0.5
-      IDF(q_i) = ln( 1 + ---------------- )
-                           n(q_i) + 0.5
+                    /        N - n(q_i) + 0.5   \
+      IDF(q_i) = ln | 1 + --------------------- |
+                    \         n(q_i) + 0.5      /
 
    Where:
-   - n(q_i)     : Document Frequency — number of chunks containing the word q_i.
+   - n(q_i)     : Document Frequency — number of chunks containing the word.
    - N          : Total number of chunks.
+   - "+ 0.5"    : simply an anti-crash safety airbag avoiding division by 0.
    
    Behavior:
    - If a word appears in almost all chunks (e.g. 'the', 'import'):
@@ -53,8 +55,8 @@ Score(D, Q) = SUM [ IDF(q_i) * --------------------------------------------- ]
      Compute Score(D, Q) for each chunk and rank the Top-k results.
 """
 
-import math
 from collections import Counter
+import math
 
 
 class CustomBM25:
@@ -81,6 +83,118 @@ class CustomBM25:
         self.k1 = k1
         self.b = b
         self.corpus_size = len(corpus)
-        self.doc_len                # The word count of each chunk
-        self.avgdl                  # Avarage word count across al chunk
-        self.idf                    # Rarity score of every word in the corpus
+
+        # The number of word for each chunk -> one chunk a time
+        self.doc_len: int = [len(doc) for doc in corpus]
+
+        # Avarage word count across al chunk
+        self.avgdl = sum(self.doc_len) / self.corpus_size
+
+        self.doc_freqs, self.idf = self._calculate_idf(corpus)
+    
+    def _calculate_idf(self, corpus: list[list[str]]):
+        """
+        Calculate the rarity score of every word in the corpus, called
+        Inverse Document Frequency (IDF)
+
+        doc_frequencies: For each chunk -> count_word occurrence
+            [
+                chunk 0 {"word_1": 2, "word_2": 1}
+                chunk 1 {"word_2": 1, "word_3": 1}
+            ]
+        word_doc_counts: How many chunk have that word inside
+            {
+                "word_1": 1, mean: only 1 chunk have the word_1
+                "word_2": 2,
+            }
+        """
+        doc_frequencies: list[dict] = []
+        word_doc_counts = Counter()
+        for chunk in corpus:
+            # How many times words are in that chunk
+            freq: dict = Counter(chunk)
+            doc_frequencies.append(freq)
+            for word in freq.keys():
+                word_doc_counts[word] += 1
+        
+        idf = {}
+        for word, count in word_doc_counts.items():
+            numerator = self.corpus_size - count + 0.5
+            denominator = count + 0.5
+            idf[word] = math.log(1.0 + (numerator / denominator))
+        
+        return doc_frequencies, idf
+
+    def get_score(self, query: list[str]) -> list[float]:
+        """
+        Calculate the score for each chunk for the current query
+        scores: list
+            - index: rapresents the chunk
+            - value: rapresents the score of that chunk for the query
+        BM25:
+            - penality: check the chunk length to avoid spamming
+            - tf: Term frequency
+        """
+        scores: list = [0.0] * self.corpus_size
+
+        for index, chunk_freq in enumerate(self.doc_freqs):
+            score = 0.0
+
+            for word in query:
+                if word not in chunk_freq:
+                    continue
+                
+                # How many times the word appear in the current chunk
+                freq = chunk_freq[word]
+
+                # BM25 formula
+                penality = 1.0 - self.b + self.b * (
+                    self.doc_len[index] / self.avgdl
+                )
+                tf = (freq * (self.k1 + 1)) / (freq + self.k1 * penality)
+                
+                # Score Compounding:
+                # If multiple words from the query appear in this chunk,
+                # their individual scores are accumulated together into
+                # the total chunk score.
+                score += self.idf.get(word, 0.0) * tf
+
+            scores[index] = score
+
+        return scores
+
+if __name__ == "__main__":
+    tokenized_corpus = [
+        ["class", "engine", "run"],
+        ["engine", "cache", "engine"],
+        ["run", "fast", "cache"],
+    ]
+
+    bm25 = CustomBM25(tokenized_corpus)
+    print("=== INITIALIZING BM25 ===")
+    print(f"Total chunks (N): {bm25.corpus_size}")
+    print(f"Doc lengths: {bm25.doc_len}")
+    print(f"Average length (avgdl): {bm25.avgdl:.2f}")
+    print("\nIDF Rarity Scores:")
+    for word, rarity in bm25.idf.items():
+        print(f"  - '{word}': {rarity:.4f}")
+
+    print("\n" + "=" * 50)
+
+    # 1. Test Query 1: Single word "engine"
+    query_1 = ["engine"]
+    scores_1 = bm25.get_score(query_1)
+    print(f"Query: {query_1}")
+    print(f"Scores for all chunks: {[round(s, 4) for s in scores_1]}")
+    winner_1 = scores_1.index(max(scores_1))
+    print(f"Best match: Chunk {winner_1} (score: {scores_1[winner_1]:.4f})")
+
+    print("\n" + "=" * 50)
+
+    # 2. Test Query 2: Multi-word "fast" and "cache"
+    query_2 = ["fast", "cache"]
+    scores_2 = bm25.get_score(query_2)
+    print(f"Query: {query_2}")
+    print(f"Scores for all chunks: {[round(s, 4) for s in scores_2]}")
+    winner_2 = scores_2.index(max(scores_2))
+    print(f"Best match: Chunk {winner_2} (score: {scores_2[winner_2]:.4f})")

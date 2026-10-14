@@ -1,7 +1,9 @@
 from .tokenizer import Tokenizer
 from .chunker import Chunker
+from .bm25 import CustomBM25
 from pathlib import Path
 from tqdm import tqdm
+import pickle
 import sys
 
 
@@ -27,6 +29,7 @@ class Indexer:
         
         self.chunker = Chunker(max_chunk_size=self.max_chunk_size)
         self.tokenizer = Tokenizer()
+        self.bm25 = None
 
     def get_target_files(self) -> list[Path]:
         """Finds all .py and .md files in the raw folder."""
@@ -61,6 +64,21 @@ class Indexer:
             tokenized_corpus.append(tokens)
 
         return tokenized_corpus
+    
+    def save(self) -> None:
+        """Saves chunks and BM25 index to disk in data/processed/."""
+        self.processed_dir.mkdir(parents=True, exist_ok=True)
+
+        # "/" in pathlib join the payh with the "file_name"
+        index_file = self.processed_dir / "index.pkl"
+
+        data = {
+            "chunk": self.all_chunks,
+            "bm25": self.bm25,
+        }
+        with open(index_file, "wb") as f:
+            pickle.dump(data, f)
+        print(f"Index successfully saved to: {index_file}")
 
     def build(self) -> None:
         # Collecting and chunking files
@@ -70,7 +88,7 @@ class Indexer:
         tokenized_corpus = self.tokenize_chunks()
 
         # Building the bm25 algorithm
-        # TODO
+        self.bm25 = CustomBM25(tokenized_corpus)
 
         # Saving index to disk
-        # TODO
+        self.save()
