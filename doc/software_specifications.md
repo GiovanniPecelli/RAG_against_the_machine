@@ -144,3 +144,89 @@ src/
 ├── retriever.py        # Top-K query retrieval & character span extraction
 └── generator.py        # Qwen/Qwen3-0.6B model loader, prompt builder, inference engine
 ```
+
+---
+
+## 5. Key Design Decisions & Implementation Choices
+
+### 5.1. Implementing BM25 from Scratch
+Instead of importing pre-built libraries like `rank-bm25` or `scikit-learn`, the entire BM25 scoring engine was built from first mathematical principles.
+* **Rationale:** Provides complete control over term saturation ($k_1$), document length penalties ($b$), and smoothing constants ($+ 0.5$). It also guarantees exact alignment between the tokenization applied during offline indexing and online query processing.
+* **Formula:** Robertson BM25 with inverse document frequency smoothing:
+  $$\text{IDF}(q_i) = \ln \left( 1 + \frac{N - n(q_i) + 0.5}{n(q_i) + 0.5} \right)$$
+  $$\text{Score}(D, Q) = \sum_{q_i \in Q} \text{IDF}(q_i) \cdot \frac{f(q_i, D) \cdot (k_1 + 1)}{f(q_i, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{avgdl}\right)}$$
+
+### 5.2. Factory Method Pattern for Model Loading (`@classmethod load`)
+* **Rationale:** Instantiating a `Retriever` requires pre-calculated `chunks` and `bm25` structures. When starting from the CLI, these objects do not yet exist in RAM; they are persisted in `data/processed/index.pkl`.
+* **Design:** Using `@classmethod def load(cls, processed_dir)` decouples disk deserialization from instance initialization. This prevents the anti-pattern of creating empty, broken instances before loading data, and enables single-line instantiation:
+  ```python
+  retriever = Retriever.load(processed_dir)
+  ```
+
+### 5.3. API Symmetry & Method Aliasing (`search = retrieve`)
+* **Rationale:** In software architecture, symmetrical naming between CLI entrypoints and core domain methods reduces cognitive overhead. 
+* **Design:** Inside `Retriever`, the search method is aliased (`search = retrieve`). As a result, the CLI commands map 1-to-1 directly to domain methods:
+  * CLI `index` $\rightarrow$ calls `Indexer.build()`
+  * CLI `search` $\rightarrow$ calls `Retriever.search()`
+  * CLI `search_dataset` $\rightarrow$ calls `Retriever.search_dataset()`
+
+### 5.4. Domain-Specific Chunking with Character Offset Tracking
+* **Rationale:** Code and documentation have fundamentally different structural semantics. Splitting code blindly by character count breaks classes and functions, ruining relevance.
+* **Design:** 
+  * Python files are partitioned along syntactic definitions (`class `, `def `, `async def `).
+  * Markdown files are split along semantic headers (`#`, `##`, `###`).
+  * Every chunk records absolute character boundaries (`first_character_index`, `last_character_index`) relative to the original file to satisfy the 42 grading specification.
+
+### 5.5. Strict Pydantic v2 Contract Validation
+* **Rationale:** To eliminate schema mismatch errors during evaluation, all inputs and outputs are validated via Pydantic models (`MinimalSource`, `MinimalSearchResults`, `StudentSearchResults`).
+* **Design:** Serialization uses native `output_data.model_dump_json(indent=2)`, which leverages Pydantic v2's compiled Rust core for high-throughput, human-readable JSON output.
+
+---
+
+## 6. Challenges Faced, Debugging & Solutions
+
+### 6.1. Preserving Chunk Indices During Top-$k$ Ranking
+* **Problem:** Calling `sorted(scores, reverse=True)` produces the top floating-point relevance scores, but strips away the original array indices, making it impossible to identify *which* chunk produced each score.
+* **Solution:** Used `list(enumerate(scores))` to generate pairs of `(index, score)`. Sorted using a lambda key targeting the score element:
+  ```python
+  indexed_scores = list(enumerate(scores))
+  sorted_pairs = sorted(indexed_scores, key=lambda item: item[1], reverse=True)[:k]
+  ```
+  This preserves the exact chunk index for downstream retrieval while keeping sorting time negligible.
+
+### 6.2. Cross-Platform Path Separator Incompatibilities
+* **Problem:** Development on Windows produces file paths using backslashes (`\`), whereas the 42 automated evaluation suite (moulinette) runs on Linux and performs verbatim string comparisons with forward slashes (`/`).
+* **Solution:** Explicitly normalized all `Path` objects into POSIX-compliant strings using `.as_posix()` across the chunker and indexing pipeline:
+  ```python
+  normalized_path = Path(file_path).as_posix()
+  ```
+
+### 6.3. Python Serialization Semantics: `dump` vs. `dumps`
+* **Problem:** Confusion between in-memory string conversion and file writing in Python's standard `pickle` and `json` libraries.
+* **Solution:** Adopted strict conventions:
+  * `dump(obj, f)` streams serialized bytes directly into an open file pointer `f`.
+  * `dumps(obj)` generates an in-memory string/bytes representation without disk I/O.
+  * In `Retriever.save()` and `search_dataset()`, file-based streaming (`pickle.dump` and `f.write(model.model_dump_json())`) was utilized to minimize peak memory allocation.
+
+### 6.4. Dynamic Dataset Filename Preservation (`ds_path.name`)
+* **Problem:** Evaluation runs tests on multiple datasets (`dataset_docs_public.json`, `dataset_code_public.json`, and hidden datasets). Hardcoding output names causes collisions or evaluation failures.
+* **Solution:** Dynamically derived output filenames from the input dataset path using `Path(dataset_path).name`, ensuring that output filenames mirror input filenames within `--save_directory`.
+
+### 6.5. Type Discipline in File System Operations
+* **Problem:** Discerning between `pathlib.Path` objects and primitive `str` types across functions, and verifying compatibility with standard library functions like `open()`.
+* **Solution:** Enforced strict type annotations (`dataset_path: str`, `path = Path(dataset_path)`). Leveraged Python 3.6+ PEP 519 path protocol, allowing `open(output_file, "w")` to accept `Path` objects natively without unnecessary string conversions.
+
+---
+
+## 7. Key Architectural Learnings & Takeaways
+
+1. **Decoupled Offline vs. Online Latency Budget:**
+   * The offline indexing phase can take up to 5 minutes to calculate vocabulary statistics, compute IDF tables, and write `index.pkl`.
+   * The online retrieval phase must be lightning-fast ($\le 90$s for 200 questions). Pre-computing statistical tables during offline indexing allows query scoring to run purely as dot-product-style term lookups in memory.
+
+2. **The Anatomy of RAG: Sources vs. Raw Context:**
+   * `MinimalSource` records provenance (`file_path`, character offsets).
+   * Generation requires extracting the physical slice (`file_content[start:end]`) to inject into the LLM prompt. Separating provenance metadata from raw text saves significant disk and network bandwidth.
+
+3. **Memory Safety with Large Codebases:**
+   * Storing entire files in memory simultaneously risks Out-Of-Memory (OOM) errors. Chunking incrementally with generators and storing structured lightweight indices keeps the memory footprint under 500MB even for thousands of files.

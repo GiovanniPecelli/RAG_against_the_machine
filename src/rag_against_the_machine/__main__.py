@@ -1,5 +1,7 @@
+from .retriever import Retriever
+from .indexer import Indexer
+from pathlib import Path
 import fire
-from src.indexer import Indexer
 
 
 class RAGCLI:
@@ -23,8 +25,12 @@ class RAGCLI:
             f"Indexing started in '{raw_dir}' "
             f"(chunk max: {max_chunk_size})..."
         )
-        # TODO
-        # Chiamare Indexer(raw_dir, processed_dir, max_chunk_size).build()
+        indexer = Indexer(
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+            max_chunk_size=max_chunk_size,
+        )
+        indexer.build()
 
     def search(
         self,
@@ -42,8 +48,18 @@ class RAGCLI:
             return
 
         print(f"Serach for: '{query}' (top {k})...")
-        # TODO
-        # chiama Retriever.search()
+
+        # Load retriever and get the result ["search" is an alias]
+        retriever = Retriever.load(processed_dir)
+        results = retriever.search(query, k=k)
+
+        # Results is a list[MinimalSource]
+        for i, source in enumerate(results, start=1):
+            print(
+                f"[{i}] {source.file_path} "
+                f"(chars {source.first_character_index} "
+                f"to {source.last_character_index})"
+            )
 
     def search_dataset(
         self,
@@ -55,13 +71,12 @@ class RAGCLI:
         processed_dir: str = "data/processed",
     ) -> None:
         """Call the retriever"""
-        pass
-        #retriever = Retriever.load(processed_dir)
-        #retriever.search_dataset(
-        #    dataset_path=dataset_path,
-        #    k=k,
-        #    save_directory=save_directory
-        #)
+        retriever = Retriever.load(processed_dir)
+        retriever.search_dataset(
+            dataset_path=dataset_path,
+            k=k,
+            save_directory=save_directory
+        )
 
 if __name__ == "__main__":
     fire.Fire(RAGCLI)
