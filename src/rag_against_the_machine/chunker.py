@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 
 class Chunker:
@@ -66,8 +65,50 @@ class Chunker:
         current_index: int = 0
         for line in lines:
             start_line_index = current_index
-            
-            is_new_header = line.startswith(keyworks)
+
+            # ================================================================
+            #            SPECIAL CASE: IF LINE > MAX_CHUNK_SIZE
+            # ================================================================
+            if len(line) > self.max_chunk_size:
+                if current_text:
+                    chunk.append({
+                        "file_path": normalized_path,
+                        "text": current_text,
+                        "first_character_index": chunk_start_index,
+                        "last_character_index": chunk_start_index + len(
+                            current_text
+                        ),
+                    })
+                    current_text = ""
+
+                for sub_start in range(0, len(line), self.max_chunk_size):
+                    sub_text = line[
+                        sub_start : sub_start + self.max_chunk_size
+                    ]
+                    sub_first_idx = current_index + sub_start
+
+                    if len(sub_text) == self.max_chunk_size:
+                        chunk.append({
+                            "file_path": normalized_path,
+                            "text": sub_text,
+                            "first_character_index": sub_first_idx,
+                            "last_character_index": sub_first_idx + len(
+                                sub_text
+                            ),
+                        })
+                        chunk_start_index = sub_first_idx + len(sub_text)
+                    else:
+                        # IF the residual text is less then max_chunk_size
+                        current_text = sub_text
+                        chunk_start_index = sub_first_idx
+
+                current_index += len(line)
+                continue
+
+            # ================================================================
+            #        NORMAL CASE: a single line length < MAX_CHUNK_SIZE
+            # ================================================================
+            is_new_header = line.lstrip().startswith(keyworks)
             would_overflow = (
                 (len(current_text) + len(line)) > self.max_chunk_size
             )
@@ -78,7 +119,9 @@ class Chunker:
                     "file_path": normalized_path,
                     "text": current_text,
                     "first_character_index": chunk_start_index,
-                    "last_character_index": chunk_start_index + len(current_text),
+                    "last_character_index": chunk_start_index + len(
+                        current_text
+                    ),
                 })
                 # Reset the variable for the next chunk
                 current_text = ""
@@ -110,10 +153,8 @@ if __name__ == "__main__":
             start = chunk['first_character_index']
             end = chunk['last_character_index']
 
-            assert (
-                full_text[start:end] == chunk['text'],
-                "Error in the chunks index"
-            )
+            is_valid_chunk = full_text[start:end] == chunk['text']
+            assert is_valid_chunk, "Error in the chunks index"
             print(
                 ("-" * 50), "\n"
                 f"{chunk['first_character_index']}:"
@@ -130,10 +171,8 @@ if __name__ == "__main__":
             start = chunk['first_character_index']
             end = chunk['last_character_index']
 
-            assert (
-                full_text[start:end] == chunk['text'],
-                "Error in the chunks index"
-            )
+            is_valid_chunk = full_text[start:end] == chunk['text']
+            assert is_valid_chunk, "Error in the chunks index"
             print(
                 ("-" * 50), "\n"
                 f"{chunk['first_character_index']}:"

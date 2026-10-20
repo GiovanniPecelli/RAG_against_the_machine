@@ -1,8 +1,29 @@
+"""
+What is Pickle in Python?
+=========================
+'pickle' is Python's built-in module for binary object serialization.
+
+- Serialization (pickle.dump):
+  Converts complex in-memory Python objects (such as chunk dictionaries and
+  the CustomBM25 instance with precomputed IDF tables and term frequencies)
+  into a byte stream that can be stored on disk (.pkl file).
+
+- Deserialization (pickle.load):
+  Reads the byte stream from disk and instantly reconstructs the original
+  Python objects in RAM with their exact state preserved.
+
+Why use Pickle in this RAG pipeline?
+It decouples offline indexing from online retrieval. We index the codebase
+once (~3,200 files) and save the resulting objects to data/processed/index.pkl.
+The Retriever then loads this precomputed binary index in milliseconds,
+eliminating the need to re-parse and re-index the raw files on every query.
+"""
+
 from pathlib import Path
+from typing import Self
+from tqdm import tqdm
 import json
 import pickle
-
-from tqdm import tqdm
 
 from .tokenizer import Tokenizer
 from .bm25 import CustomBM25
@@ -14,17 +35,21 @@ from .model import (
 
 
 class Retriever:
-    def __init__(self, chunks: list[dict], bm25: CustomBM25):
+    def __init__(self, chunks: list[dict], bm25: CustomBM25) -> None:
         self.chunks = chunks
         self.bm25 = bm25
         self.tokenizer = Tokenizer()
 
     @classmethod
-    def load(cls, processed_dir: str = "data/processed"):
+    def load(cls, processed_dir: str = "data/processed") -> Self | None:
         """Load the chunks and bm25 data form index.pkl file"""
         index_path = Path(processed_dir) / "index.pkl"
         if not index_path.exists():
-            raise FileNotFoundError(f"Index.pkl not found at '{index_path}'")
+            print(
+                f"Error: Index file not found at '{index_path}'. "
+                "Run 'index' first."
+            )
+            return None
 
         with open(index_path, "rb") as f:
             data = pickle.load(f)
@@ -34,6 +59,9 @@ class Retriever:
         )
 
     def retrieve(self, query: str, k: int = 5) -> list[MinimalSource]:
+        if not query or not query.strip() or k <= 0:
+            return []
+
         tokenized_query = self.tokenizer.tokenize(query)
 
         # Retrieve use bm25.get_score who need the QUERY
@@ -67,12 +95,28 @@ class Retriever:
         k: int = 5,
         save_directory: str = "data/output/search_results/UnansweredQuestions"
     ) -> None:
+        if k <= 0:
+            print("Error: k must be greater than 0.")
+            return
+
         ds_path = Path(dataset_path)
         if not ds_path.exists():
-            raise FileNotFoundError(f"dataset not found at '{dataset_path}'")
+            print(f"Error: Dataset not found at '{dataset_path}'")
+            return
 
-        with open(ds_path, "r") as f:
-            data = json.load(f)
+        try:
+            with open(ds_path, "r") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error: Malformed JSON in dataset '{dataset_path}'")
+            return
+        except Exception as e:
+            print(f"Error reading dataset '{dataset_path}': {e}")
+            return
+
+        if not isinstance(data, dict) or "rag_questions" not in data:
+            print(f"Error: Invalid dataset format in '{dataset_path}'")
+            return
 
         # Python automatically cast it to a list of dict
         # {"question_id": "value_id",

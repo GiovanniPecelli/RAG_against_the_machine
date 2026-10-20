@@ -51,6 +51,9 @@ class RAGCLI:
 
         # Load retriever and get the result ["search" is an alias]
         retriever = Retriever.load(processed_dir)
+        if not retriever:
+            return
+
         results = retriever.search(query, k=k)
 
         # Results is a list[MinimalSource]
@@ -70,8 +73,12 @@ class RAGCLI:
         ),
         processed_dir: str = "data/processed",
     ) -> None:
-        """Call the retriever"""
+        """Call the retriever to search for the entire dataset"""
+
         retriever = Retriever.load(processed_dir)
+        if not retriever:
+            return
+
         retriever.search_dataset(
             dataset_path=dataset_path,
             k=k,

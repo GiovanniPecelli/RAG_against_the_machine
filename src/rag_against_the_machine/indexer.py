@@ -4,7 +4,6 @@ from .bm25 import CustomBM25
 from pathlib import Path
 from tqdm import tqdm
 import pickle
-import sys
 
 
 class Indexer:
@@ -12,7 +11,7 @@ class Indexer:
         raw_dir: str = "data/raw/vllm-0.10.1",
         processed_dir: str = "data/processed",
         max_chunk_size: int = 2000
-    ):
+    ) -> None:
         self.raw_dir = Path(raw_dir)
         self.processed_dir = Path(processed_dir)
         self.max_chunk_size = max_chunk_size
@@ -25,11 +24,11 @@ class Indexer:
         #     "first_character_index": chunk_start_index,
         #     "last_character_index": chunk_start_index + len(current_text),
         # })
-        self.all_chunks = []
+        self.all_chunks: list[dict] = []
         
         self.chunker = Chunker(max_chunk_size=self.max_chunk_size)
         self.tokenizer = Tokenizer()
-        self.bm25 = None
+        self.bm25: CustomBM25 | None = None
 
     def get_target_files(self) -> list[Path]:
         """Finds all .py and .md files in the raw folder."""
@@ -38,12 +37,13 @@ class Indexer:
             return []
 
         # rglob("*") searches recursively through all subfolders
-        return [
+        files = [
             file for file in self.raw_dir.rglob("*")
             if file.is_file() and file.suffix in [".py", ".md"]
         ]
+        return sorted(files)
 
-    def collect_chunks(self):
+    def collect_chunks(self) -> None:
         """
         Finds all files and chunks them one by one.
             files: contain a list of path -> file

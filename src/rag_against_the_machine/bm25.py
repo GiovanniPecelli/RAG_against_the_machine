@@ -1,4 +1,4 @@
-"""
+r"""
 BM25 (Best Matching 25) Retrieval Algorithm
 ============================================
 
@@ -85,14 +85,18 @@ class CustomBM25:
         self.corpus_size = len(corpus)
 
         # The number of word for each chunk -> one chunk a time
-        self.doc_len: int = [len(doc) for doc in corpus]
+        self.doc_len: list[int] = [len(doc) for doc in corpus]
 
         # Avarage word count across al chunk
-        self.avgdl = sum(self.doc_len) / self.corpus_size
+        self.avgdl = (
+            sum(self.doc_len) / self.corpus_size
+        ) if self.corpus_size > 0 else 0.0
 
         self.doc_freqs, self.idf = self._calculate_idf(corpus)
     
-    def _calculate_idf(self, corpus: list[list[str]]):
+    def _calculate_idf(
+            self, corpus: list[list[str]]
+    ) -> tuple[list[dict[str, int]], dict[str, float]]:
         """
         Calculate the rarity score of every word in the corpus, called
         Inverse Document Frequency (IDF)
