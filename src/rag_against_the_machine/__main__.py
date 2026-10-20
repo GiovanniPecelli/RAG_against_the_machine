@@ -1,7 +1,12 @@
+from .model import MinimalAnswer, StudentSearchResultsAndAnswer
 from .retriever import Retriever
+from .generator import Generator
 from .indexer import Indexer
+
 from pathlib import Path
 import fire
+
+from rag_against_the_machine import retriever
 
 
 class RAGCLI:
@@ -84,6 +89,32 @@ class RAGCLI:
             k=k,
             save_directory=save_directory
         )
+
+    def answer(
+            self,
+            query: str,
+            k: int = 5,
+            processed_dir: str = "data/processed",
+            model_name: str = "Qwen/Qwen3-0.6B",
+    ) -> None:
+        """Answer a single query using the retrieved context."""
+        if not query or not query.strip():
+            print("Error: The query can't be empty.")
+            return
+
+        if k <= 0:
+            print("Error: k must be greater than 0.")
+            return
+
+        retriever = Retriever.load(processed_dir)
+        if not retriever:
+            return
+
+        sources = retriever.retrieve(query, k)
+
+        generator = Generator(model_name=model_name)
+        answer_text = generator.generate_answer(query, sources)
+        
 
 if __name__ == "__main__":
     fire.Fire(RAGCLI)
