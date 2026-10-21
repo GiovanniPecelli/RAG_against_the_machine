@@ -1,5 +1,4 @@
 from .retriever import Retriever
-from .generator import Generator
 from .indexer import Indexer
 
 from pathlib import Path
@@ -7,6 +6,7 @@ import fire
 
 
 class RAGCLI:
+    """RAG against the machine CLI."""
     def index(
         self,
         max_chunk_size: int = 2000,
@@ -109,6 +109,8 @@ class RAGCLI:
 
         sources = retriever.retrieve(query, k)
 
+        from .generator import Generator
+
         generator = Generator(model_name=model_name)
         answer_text = generator.generate_answer(query, sources)
         print(f"\n--- Answer ---\n{answer_text}\n")
@@ -125,6 +127,8 @@ class RAGCLI:
         Generate answers for a dataset, producing a
         StudentSearchResultsAndAnswer JSON file.
         """
+        from .generator import Generator
+
         generator = Generator(model_name=model_name)
         generator.generate_answer_dataset(
             student_search_results_path,
@@ -133,4 +137,4 @@ class RAGCLI:
 
 
 if __name__ == "__main__":
-    fire.Fire(RAGCLI)
+    fire.Fire(RAGCLI())

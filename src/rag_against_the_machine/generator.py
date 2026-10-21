@@ -189,16 +189,16 @@ class Generator:
             answer = answer.split("</think>")[-1]
 
         elif "<think>" in answer:
-            answer = answer.split("</think>")[-1]
             return (
                 "Error: Token budget exhausted during reasoning. "
                 "Please increase max_new_tokens."
             )
 
+        answer = answer.strip()
         if not answer:
             return "Unable to produce an answer from the retrieved sources."
 
-        return answer.strip()
+        return answer
 
     def generate_answer_dataset(
         self,

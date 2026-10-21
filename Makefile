@@ -1,6 +1,7 @@
 .PHONY: all install run debug clean clean-venv clean-data lint lint-strict data help
 
 PYTHON ?= uv run python
+ARGS ?= --help
 
 all: install
 
@@ -36,7 +37,7 @@ clean-data:
 	@echo "Data directory removed."
 
 run:
-	$(PYTHON) -m src
+	$(PYTHON) -m src $(ARGS)
 
 debug:
 	$(PYTHON) -m pdb -m src
