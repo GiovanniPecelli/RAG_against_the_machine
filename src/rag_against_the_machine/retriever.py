@@ -141,12 +141,14 @@ class Retriever:
             k=k,
         )
 
+        # ====================================================================
+        #                   Saving Output in save_directory
+        # ====================================================================
         save_dir = Path(save_directory)
         save_dir.mkdir(parents=True, exist_ok=True)
         # ds_path.name take the last name in the Path
         output_file = save_dir / ds_path.name
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(output_data.model_dump_json(indent=2))
-
         print(f"Saved student_search_results to {output_file}")

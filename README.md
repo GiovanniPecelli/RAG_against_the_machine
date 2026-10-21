@@ -222,6 +222,9 @@ uv run python -m src answer_dataset \
 * **vLLM Documentation:** Architecture and configuration reference for the raw repository.
 * **Pydantic v2 Documentation:** Fast serialization and contract validation in Python.
 * **Python Fire:** Google library for building CLI interfaces automatically from classes.
+* **Hugging Face `transformers`:** Library used for loading and running `Qwen/Qwen3-0.6B` (`AutoTokenizer`, `AutoModelForCausalLM`). The core autoregressive generation mechanism lives in [`transformers/generation/utils.py`](https://github.com/huggingface/transformers/blob/main/src/transformers/generation/utils.py):
+  * `GenerationMixin.generate()` entrypoint: Line **2568**
+  * Core autoregressive token loop (`_sample`): Line **3104**, with the `while self._has_unfinished_sequences(...)` iterative step loop at Line **3211**.
 
 ### AI Usage Disclosure
 In accordance with the 42 curriculum guidelines, Artificial Intelligence (LLM pair-programming assistant) was used as follows:

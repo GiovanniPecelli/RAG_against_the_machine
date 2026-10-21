@@ -1,12 +1,9 @@
-from .model import MinimalAnswer, StudentSearchResultsAndAnswer
 from .retriever import Retriever
 from .generator import Generator
 from .indexer import Indexer
 
 from pathlib import Path
 import fire
-
-from rag_against_the_machine import retriever
 
 
 class RAGCLI:
@@ -28,7 +25,7 @@ class RAGCLI:
 
         print(
             f"Indexing started in '{raw_dir}' "
-            f"(chunk max: {max_chunk_size})..."
+            f"(chunk max: {max_chunk_size})"
         )
         indexer = Indexer(
             raw_dir=raw_dir,
@@ -91,11 +88,11 @@ class RAGCLI:
         )
 
     def answer(
-            self,
-            query: str,
-            k: int = 5,
-            processed_dir: str = "data/processed",
-            model_name: str = "Qwen/Qwen3-0.6B",
+        self,
+        query: str,
+        k: int = 5,
+        processed_dir: str = "data/processed",
+        model_name: str = "Qwen/Qwen3-0.6B",
     ) -> None:
         """Answer a single query using the retrieved context."""
         if not query or not query.strip():
@@ -114,7 +111,26 @@ class RAGCLI:
 
         generator = Generator(model_name=model_name)
         answer_text = generator.generate_answer(query, sources)
-        
+        print(f"\n--- Answer ---\n{answer_text}\n")
+
+    def answer_dataset(
+        self,
+        student_search_results_path: str,
+        save_directory: str = (
+            "data/output/search_results_and_answer/UnansweredQuestions"
+        ),
+        model_name: str = "Qwen/Qwen3-0.6B",
+    ) -> None:
+        """
+        Generate answers for a dataset, producing a
+        StudentSearchResultsAndAnswer JSON file.
+        """
+        generator = Generator(model_name=model_name)
+        generator.generate_answer_dataset(
+            student_search_results_path,
+            save_directory,
+        )
+
 
 if __name__ == "__main__":
     fire.Fire(RAGCLI)

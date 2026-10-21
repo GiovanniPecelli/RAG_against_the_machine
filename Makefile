@@ -1,4 +1,4 @@
-.PHONY: all install run debug clean clean-data lint lint-strict data help
+.PHONY: all install run debug clean clean-venv clean-data lint lint-strict data help
 
 PYTHON ?= uv run python
 
@@ -44,7 +44,10 @@ debug:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .mypy_cache .pytest_cache .ruff_cache subject_extracted.txt
+	rm -rf .mypy_cache .pytest_cache .ruff_cache
+
+clean-venv:
+	rm -rf .venv
 
 lint:
 	uv run flake8 .

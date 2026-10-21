@@ -51,6 +51,7 @@ class Indexer:
         """
         files = self.get_target_files()
 
+        print("\nStart of the file chunk ...")
         for file_path in tqdm(files):
             file_chunks = self.chunker.chunk_file(file_path)
             self.all_chunks.extend(file_chunks)
@@ -59,6 +60,7 @@ class Indexer:
         """Tokenizes the text of every collected chunk."""
         tokenized_corpus = []
 
+        print("\nTokenizing the chunks ...")
         for chunk in tqdm(self.all_chunks):
             tokens = self.tokenizer.tokenize(chunk["text"])
             tokenized_corpus.append(tokens)
@@ -78,7 +80,7 @@ class Indexer:
         }
         with open(index_file, "wb") as f:
             pickle.dump(data, f)
-        print(f"Index successfully saved to: {index_file}")
+        print(f"\nIndex successfully saved to: {index_file}")
 
     def build(self) -> None:
         # Collecting and chunking files
