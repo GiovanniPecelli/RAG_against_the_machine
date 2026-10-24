@@ -24,33 +24,51 @@ class Chunker:
         normalized_path: str = file_path.as_posix()
 
         if file_path.suffix == ".md":
-            return self.chunk_markdown(content, normalized_path)
+            return self.chunk_Markdown(content, normalized_path)
+        elif file_path.suffix == ".txt":
+            return self.chunk_text(content, normalized_path)
         elif file_path.suffix == ".py":
             return self.chunk_python(content, normalized_path)
 
         return []
 
-    def chunk_markdown(
+    def chunk_Markdown(
         self,
         content: str,
         normalized_path: str
     ) -> list[dict]:
-        """Split Markdown by headers (#) and paragraphs."""
-        return self._slice_text(content, normalized_path, keyworks=("#",))
+        """Split Markdown files by headers (#) and paragraphs."""
+        return self._slice_files(
+            content,
+            normalized_path,
+            keyworks=("# ","## ",)
+        )
+
+    def chunk_text(
+        self,
+        content: str,
+        normalized_path: str
+    ) -> list[dict]:
+        """Split Generic Text and config files by (\n) or max chunk size"""
+        return self._slice_files(
+            content,
+            normalized_path,
+            keyworks=("\n",)
+        )
 
     def chunk_python(
         self,
         content: str,
         normalized_path: str
     ) -> list[dict]:
-        """Split Markdown by headers (#) and paragraphs."""
-        return self._slice_text(
+        """Split Python files by headers (class, def and async def)"""
+        return self._slice_files(
             content,
             normalized_path,
             keyworks=("class ", "def ", "async def ")
         )
 
-    def _slice_text(
+    def _slice_files(
         self,
         content: str,
         normalized_path: str,
@@ -113,8 +131,12 @@ class Chunker:
                 (len(current_text) + len(line)) > self.max_chunk_size
             )
 
+            should_split = (
+                (is_new_header and len(current_text) >= 200) or would_overflow
+            )
+
             # NEW CHUNK -> if there is an header or would overflow
-            if (is_new_header or would_overflow) and current_text:
+            if should_split and current_text:
                 chunk.append({
                     "file_path": normalized_path,
                     "text": current_text,

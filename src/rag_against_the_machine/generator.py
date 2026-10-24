@@ -110,10 +110,14 @@ class Generator:
         ]
 
         # specifications in the docstring
-        return self.auto_tokenizer.apply_chat_template(
+        prompt = self.auto_tokenizer.apply_chat_template(
             messages, tokenize=False,
             add_generation_prompt=True
         )
+
+        # "<think>\n</think>\n":
+        # say to the model that thought are already ended
+        return prompt + "<think>\n</think>\n"
 
     def generate_answer(
             self,
@@ -150,9 +154,10 @@ class Generator:
                 Uses greedy decoding for deterministic, factual answers.
         """
         if max_new_tokens is None:
-            max_new_tokens = max(384, 200 + (50 * len(sources)))
+            max_new_tokens = 150
 
-        snippets = self.extract_snippets(sources)
+        # Send to model 3 sources to reduce the waiting time
+        snippets = self.extract_snippets(sources[:3])
         if not snippets:
             return "No relevant context found to answer the question."
 
@@ -217,7 +222,7 @@ class Generator:
             return
 
         try:
-            with open(dataset_path, "r") as f:
+            with open(dataset_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError:
             print(f"Error: Malformed JSON in '{student_search_results_path}'")

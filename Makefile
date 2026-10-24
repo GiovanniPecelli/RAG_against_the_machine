@@ -12,6 +12,7 @@ help:
 	@echo "  debug        Execute the main entrypoint in debug mode using pdb"
 	@echo "  clean        Remove temporary cache files and directories"
 	@echo "  clean-data   Remove the data/ directory completely"
+	@echo "  clean-venv   Remove the venv/ completely"
 	@echo "  lint         Run flake8 and mypy according to subject requirements"
 	@echo "  lint-strict  Run flake8 and mypy in strict mode"
 	@echo "  data         Create data/ structure and extract vLLM/dataset zip files"

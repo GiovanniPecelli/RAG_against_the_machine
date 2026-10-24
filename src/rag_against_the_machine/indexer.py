@@ -39,7 +39,7 @@ class Indexer:
         # rglob("*") searches recursively through all subfolders
         files = [
             file for file in self.raw_dir.rglob("*")
-            if file.is_file() and file.suffix in [".py", ".md"]
+            if file.is_file() and file.suffix in [".py", ".md", ".txt"]
         ]
         return sorted(files)
 

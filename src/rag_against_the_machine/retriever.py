@@ -58,7 +58,7 @@ class Retriever:
             bm25=data["bm25"]
         )
 
-    def retrieve(self, query: str, k: int = 5) -> list[MinimalSource]:
+    def retrieve(self, query: str, k: int = 10) -> list[MinimalSource]:
         if not query or not query.strip() or k <= 0:
             return []
 
@@ -92,7 +92,7 @@ class Retriever:
     def search_dataset(
         self,
         dataset_path: str,
-        k: int = 5,
+        k: int = 10,
         save_directory: str = "data/output/search_results/UnansweredQuestions"
     ) -> None:
         if k <= 0:
@@ -105,7 +105,7 @@ class Retriever:
             return
 
         try:
-            with open(ds_path, "r") as f:
+            with open(ds_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError:
             print(f"Error: Malformed JSON in dataset '{dataset_path}'")
