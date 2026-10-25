@@ -7,6 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 import torch
 import json
+import os
 
 from .model import (
     MinimalSource,
@@ -32,9 +33,18 @@ class Generator:
             AutoTokenizer.from_pretrained(model_name)
         )
 
+        # bfloat16 have the scope to reduce the data heavy
+        # modern LLMs (including Qwen3) were trained natively in bfloat16
         self.auto_model = (
-            AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
+            AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+            ).to(self.device)
         )
+
+        # Force PyTorch to use all available CPU cores
+        threads = os.cpu_count() or 4
+        torch.set_num_threads(threads)
 
     def extract_snippets(
             self, sources: list[MinimalSource]
@@ -96,11 +106,12 @@ class Generator:
             "snippets.\n"
             "If the context does not contain enough information, "
             "state that clearly.\n"
+            "Answer directly in 1 to 2 sentences without filler."
             "Be factual, concise, and do not hallucinate."
         )
 
         user_prompt = (
-            f"Context snippets: \n{context_str}\n\nQuestion: {query}" 
+            f"Context snippets: \n{context_str}\n\nQuestion: {query}"
         )
 
         # specifications in the docstring
@@ -143,9 +154,9 @@ class Generator:
                 Unpacks the dictionary of tensors (input_ids, attention_mask)
                 as keyword arguments to model.generate().
                     data structure example:
-                    inputs = {                                                                 
-                        "input_ids": tensor([[151644, 8948, 279, 102]]),                       
-                        "attention_mask": tensor([[1, 1, 1, 1]])                               
+                    inputs = {
+                        "input_ids": tensor([[151644, 8948, 279, 102]]),
+                        "attention_mask": tensor([[1, 1, 1, 1]])
                     }
             max_new_tokens:
                 Limits the maximum number of newly generated tokens in the
@@ -154,7 +165,7 @@ class Generator:
                 Uses greedy decoding for deterministic, factual answers.
         """
         if max_new_tokens is None:
-            max_new_tokens = 150
+            max_new_tokens = 180
 
         # Send to model 3 sources to reduce the waiting time
         snippets = self.extract_snippets(sources[:3])
@@ -167,14 +178,18 @@ class Generator:
             return_tensors="pt",
         ).to(self.device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             # generate() is a loop that every time pass:
             # the PROMPT and what is already generated to the llm
             # to generate the NEXT token
+            # do_sample: Always picks the word with the highest probability
+            #    IF True: the llm is in creative mode.
+            #    it could use random and temperature properties
             outputs = self.auto_model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
+                use_cache=True,
             )
 
         # outputs[0] = [ all PROMPT + generated ANSWER ]
@@ -213,7 +228,7 @@ class Generator:
         ),
     ) -> None:
         """
-        Reads search results JSON, generates answers, and saves 
+        Reads search results JSON, generates answers, and saves
         StudentSearchResultsAndAnswer.
         """
         dataset_path: Path = Path(student_search_results_path)

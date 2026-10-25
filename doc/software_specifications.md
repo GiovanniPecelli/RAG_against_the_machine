@@ -230,3 +230,13 @@ Instead of importing pre-built libraries like `rank-bm25` or `scikit-learn`, the
 
 3. **Memory Safety with Large Codebases:**
    * Storing entire files in memory simultaneously risks Out-Of-Memory (OOM) errors. Chunking incrementally with generators and storing structured lightweight indices keeps the memory footprint under 500MB even for thousands of files.
+
+4. **The Two Main Families of Information Retrieval (IR):**
+   * **Sparse / Lexical Retrieval (Mandatory: BM25):**
+     * Fast, lightweight, exact keyword matching based on probabilistic TF-IDF statistics.
+     * Fails on synonyms, paraphrases, and conceptual queries.
+   * **Dense / Semantic Retrieval (Bonus 1: Vector Embeddings with `all-MiniLM-L6-v2`):**
+     * Translates text into continuous numerical coordinates (384-dimensional dense vectors).
+     * Matches concepts, intent, and meaning even when completely different words are used.
+   * **Hybrid Retrieval (Bonus 2: Reciprocal Rank Fusion - RRF):**
+     * Merges both sparse keyword precision and dense semantic recall into a unified result ranking.
