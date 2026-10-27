@@ -1,9 +1,11 @@
 from .tokenizer import Tokenizer
+from .embedding import Embedder
 from .chunker import Chunker
 from .bm25 import CustomBM25
 from pathlib import Path
 from tqdm import tqdm
 import pickle
+import torch
 
 
 class Indexer:
@@ -25,10 +27,12 @@ class Indexer:
         #     "last_character_index": chunk_start_index + len(current_text),
         # })
         self.all_chunks: list[dict] = []
+        self.vectors: torch.Tensor | None = None
         
         self.chunker = Chunker(max_chunk_size=self.max_chunk_size)
         self.tokenizer = Tokenizer()
         self.bm25: CustomBM25 | None = None
+        self.embedder = Embedder()
 
     def get_target_files(self) -> list[Path]:
         """Finds all .py and .md files in the raw folder."""
@@ -53,7 +57,7 @@ class Indexer:
 
         print("\nStart of the file chunk ...")
         for file_path in tqdm(files):
-            file_chunks = self.chunker.chunk_file(file_path)
+            file_chunks: list[dict] = self.chunker.chunk_file(file_path)
             self.all_chunks.extend(file_chunks)
 
     def tokenize_chunks(self) -> list[list[str]]:
@@ -66,9 +70,44 @@ class Indexer:
             tokenized_corpus.append(tokens)
 
         return tokenized_corpus
+
+    def text_extraction(self) -> list[str]:
+        """
+        text extraction from every processed chunks.
+        This text is necessary to the semantic embedding algorithm
+        """
+        extracted_chunk_text: list[str] = []
+
+        current_path = None
+        current_content: str = ""
+        
+        if self.all_chunks is None:
+            print("[ERROR] text extraction not possible -> check indexer.py")
+            return []
+
+        for chunk in tqdm(self.all_chunks):
+            current_path = self.all_chunks["file_path"]
+
+            if chunk["file_path"] != current_path:
+                with open (chunk["file_path"], "r", encoding="utf-8") as f:
+                    current_content = f.read()
+            current_path = chunk["file_path"]
+        
+            text_slice = current_content[
+                chunk["first_character_index"] : chunk["last_character_index"]
+            ]
+            extracted_chunk_text.append(text_slice)
+
+            return extracted_chunk_text
     
-    def save(self) -> None:
-        """Saves chunks and BM25 index to disk in data/processed/."""
+    # TODO ADD: save the vectors var in a .pt file
+    def save(self, semantic: bool = False) -> None:
+        """
+        Saves: 
+        -   chunks 
+        -   BM25 index
+        -   if semantic == True -> semantic embedding file.pt
+        to disk in data/processed/."""
         self.processed_dir.mkdir(parents=True, exist_ok=True)
 
         # "/" in pathlib join the payh with the "file_name"
@@ -82,7 +121,7 @@ class Indexer:
             pickle.dump(data, f)
         print(f"\nIndex successfully saved to: {index_file}")
 
-    def build(self) -> None:
+    def build(self, semantic: bool = False) -> None:
         # Collecting and chunking files
         self.collect_chunks()
 
@@ -92,5 +131,11 @@ class Indexer:
         # Building the bm25 algorithm
         self.bm25 = CustomBM25(tokenized_corpus)
 
+        if semantic:
+            extracted_chunk_text = self.text_extraction()
+            vectors: torch.Tensor = self.embedder.embedding_encoder(
+                texts=extracted_chunk_text
+            )
+
         # Saving index to disk
-        self.save()
+        self.save(semantic)

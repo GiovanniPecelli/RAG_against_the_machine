@@ -41,6 +41,7 @@ class RAGCLI:
         max_chunk_size: int = 2000,
         processed_dir: str = "data/processed",
         raw_dir: str = "data/raw/vllm-0.10.1",
+        semantic: bool = False,
     ) -> None:
         """ingest the file and build the BM25 index."""
         if max_chunk_size <= 0:
@@ -61,7 +62,7 @@ class RAGCLI:
             processed_dir=processed_dir,
             max_chunk_size=max_chunk_size,
         )
-        indexer.build()
+        indexer.build(semantic)
 
     def search(
         self,
