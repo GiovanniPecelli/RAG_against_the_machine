@@ -147,6 +147,7 @@ In accordance with Chapter VII of the 42 subject, the retrieval engine satisfies
 ## 8. Instructions & Installation
 
 ### Prerequisites
+Ensure you have Python and uv installed, then set up the environment:
 * Python 3.10+
 * [uv](https://docs.astral.sh/uv/) package manager
 
@@ -159,6 +160,15 @@ cd RAG_against_the_machine
 # Install dependencies with uv
 make install
 # or directly: uv sync
+```
+#### If you are on a 42 Network machine USER -> ($USER | (whoami) | user_name)
+
+```bash
+rm -rf .venv && mkdir -p /goinfre/$USER/{venvs/rag_against_the_machine,.cache,tmp,uv,huggingface}
+```
+
+```bash
+export UV_PROJECT_ENVIRONMENT=/goinfre/$USER/venvs/rag_against_the_machine UV_LINK_MODE=copy XDG_CACHE_HOME=/goinfre/$USER/.cache TMPDIR=/goinfre/$USER/tmp UV_CACHE_DIR=/goinfre/$USER/uv HF_HOME=/goinfre/$USER/huggingface
 ```
 
 ### Data Preparation

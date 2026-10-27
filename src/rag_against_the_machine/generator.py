@@ -38,7 +38,7 @@ class Generator:
         self.auto_model = (
             AutoModelForCausalLM.from_pretrained(
                 model_name,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
             ).to(self.device)
         )
 
