@@ -163,6 +163,9 @@ class CustomBM25:
                 # the total chunk score.
                 score += self.idf.get(word, 0.0) * tf
 
+            # each chunk rapresented by the index recieve a score based on
+            # the relationship between every single word in the query and
+            # the occurance calculated in the chunk_freq[word] -> doc_freq
             scores[index] = score
 
         return scores

@@ -2,8 +2,11 @@ from .tokenizer import Tokenizer
 from .embedding import Embedder
 from .chunker import Chunker
 from .bm25 import CustomBM25
+
 from pathlib import Path
 from tqdm import tqdm
+
+import numpy as np
 import pickle
 import torch
 
@@ -73,34 +76,11 @@ class Indexer:
 
     def text_extraction(self) -> list[str]:
         """
-        text extraction from every processed chunks.
+        text extraction from every chunks.
         This text is necessary to the semantic embedding algorithm
         """
-        extracted_chunk_text: list[str] = []
+        return [chunk["text"] for chunk in self.all_chunks]
 
-        current_path = None
-        current_content: str = ""
-        
-        if self.all_chunks is None:
-            print("[ERROR] text extraction not possible -> check indexer.py")
-            return []
-
-        for chunk in tqdm(self.all_chunks):
-            current_path = self.all_chunks["file_path"]
-
-            if chunk["file_path"] != current_path:
-                with open (chunk["file_path"], "r", encoding="utf-8") as f:
-                    current_content = f.read()
-            current_path = chunk["file_path"]
-        
-            text_slice = current_content[
-                chunk["first_character_index"] : chunk["last_character_index"]
-            ]
-            extracted_chunk_text.append(text_slice)
-
-            return extracted_chunk_text
-    
-    # TODO ADD: save the vectors var in a .pt file
     def save(self, semantic: bool = False) -> None:
         """
         Saves: 
@@ -114,12 +94,50 @@ class Indexer:
         index_file = self.processed_dir / "index.pkl"
 
         data = {
-            "chunk": self.all_chunks,
+            "all_chunks": self.all_chunks,
             "bm25": self.bm25,
         }
         with open(index_file, "wb") as f:
             pickle.dump(data, f)
         print(f"\nIndex successfully saved to: {index_file}")
+
+        if semantic and self.vectors is not None:
+            vector_file = self.processed_dir / "vectors.npy"
+            
+            # change the tensor on the cpu before conversion
+            np.save(vector_file, self.vectors.cpu().numpy())
+            print(f"Semantic vectors successfully saved to: {vector_file}")
+
+            # ================================================================
+            #          Saving vectors as TSV (tab_separated_value)
+            # ================================================================
+            projector_dir = self.processed_dir / "tf_projector"
+            projector_dir.mkdir(parents=True, exist_ok=True)
+
+            vectors_tsv = projector_dir / "vectors.tsv"
+            meta_tsv = projector_dir / "metadata.tsv"
+
+            with open(vectors_tsv, "w", encoding="utf-8") as f:
+                vectors_list = self.vectors.cpu().tolist()
+                for vector in vectors_list:
+                    f.write("\t".join(str(coord) for coord in vector) + "\n")
+
+            with open(meta_tsv, "w", encoding="utf-8") as f:
+                f.write("FilePath\tFileType\tStartIndex\tChunkSize\n")
+                for chunk in self.all_chunks:
+                    path = chunk["file_path"]
+                    start = chunk["first_character_index"]
+                    if Path(path).suffix:
+                        file_type = Path(path).suffix
+                    else: 
+                        file_type = "unknown"
+
+                    # "\" - ignore the line separation
+                    size = chunk["last_character_index"] \
+                            - chunk["first_character_index"]
+                    f.write(f"{path}\t{file_type}\t{start}\t{size}\n")
+
+            print(f"TensorFlow Projector TSV files saved to: {projector_dir}")
 
     def build(self, semantic: bool = False) -> None:
         # Collecting and chunking files
@@ -133,7 +151,7 @@ class Indexer:
 
         if semantic:
             extracted_chunk_text = self.text_extraction()
-            vectors: torch.Tensor = self.embedder.embedding_encoder(
+            self.vectors = self.embedder.embedding_encoder(
                 texts=extracted_chunk_text
             )
 

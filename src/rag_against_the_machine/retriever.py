@@ -19,13 +19,17 @@ The Retriever then loads this precomputed binary index in milliseconds,
 eliminating the need to re-parse and re-index the raw files on every query.
 """
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Self
 from tqdm import tqdm
-import json
+import numpy as np
 import pickle
+import torch
+import json
 
 from .tokenizer import Tokenizer
+from .embedding import Embedder
 from .bm25 import CustomBM25
 from .model import (
     MinimalSource,
@@ -35,10 +39,17 @@ from .model import (
 
 
 class Retriever:
-    def __init__(self, chunks: list[dict], bm25: CustomBM25) -> None:
+    def __init__(
+        self,
+        chunks: list[dict],
+        bm25: CustomBM25,
+        vectors: torch.Tensor | None = None
+    ) -> None:
         self.chunks = chunks
         self.bm25 = bm25
+        self.vectors = vectors
         self.tokenizer = Tokenizer()
+        self.embedder: Embedder | None = None
 
     @classmethod
     def load(cls, processed_dir: str = "data/processed") -> Self | None:
@@ -53,38 +64,126 @@ class Retriever:
 
         with open(index_path, "rb") as f:
             data = pickle.load(f)
+
+        vector_file = Path(processed_dir) / "vectors.npy"
+        vectors: torch.Tensor | None = None
+
+        if vector_file.exists():
+            try:
+                np_vectors = np.load(vector_file)
+                vectors = torch.from_numpy(np_vectors).float()
+            except Exception as e:
+                print(f"Warning: Failed to load vectors: {e}")
+
         return cls(
-            chunks=data["chunk"],
-            bm25=data["bm25"]
+            chunks=data["all_chunks"],
+            bm25=data["bm25"],
+            vectors=vectors,
         )
 
-    def retrieve(self, query: str, k: int = 10) -> list[MinimalSource]:
-        if not query or not query.strip() or k <= 0:
-            return []
-
+    def _get_bm25_indices(self, query: str, k: int = 10) -> list[int]:
+        """Indexes chunks with bm25
+        return:
+            sorted index
+        """
         tokenized_query = self.tokenizer.tokenize(query)
 
         # Retrieve use bm25.get_score who need the QUERY
+        # scores is a float list where every chunk have a score
+        # that rapresent the relationship with the current query
         scores = self.bm25.get_score(tokenized_query)
         indexed_scores = list(enumerate(scores))
-        sorted_scores = sorted(
-            indexed_scores,
-            key=lambda item: item[1],
-            reverse=True
+        indexed_scores.sort(key=lambda item: item[1], reverse=True)
+
+        # need only the INDICES -> "chunk idx", "float score for chunk"
+        return [idx for idx, _ in indexed_scores[:k]]
+
+    def _get_semantic_indices(self, query: str, k: int = 10) -> list[int]:
+        """Indexes chunks with semantic embeddings"""
+        if self.vectors is None:
+            return []
+
+        if self.embedder is None:
+            self.embedder = Embedder()
+
+        query_vec = self.embedder.embedding_encoder(texts=[query])
+
+        # Calculate cosine similarity via Dot_Product
+        # (both are already L2-normalized)
+        # 1) self.vectors: Document matrix of shape (N, D)
+        # 2) query_vec.T: where T(Transpose): Flips the query from (1, D)
+        #    to (D, 1) to enable matmul
+        # 3) .squeeze(-1): Removes the trailing dimension of size 1,
+        #    turning (N, 1) into a flat 1D tensor of shape (N,)
+        #    N: values that rapresent similarity of each chunks with the query
+        scores = torch.matmul(
+            self.vectors,
+            query_vec.T
+        ).squeeze(-1)
+
+        # torch.topk(...): is an optimized function provide by PyTorch
+        # that scans each score calculated by the previous line and 
+        # exctracts only the top_k values (the nearest -> higher values)
+        top_k = min(k, len(self.chunks))
+        return torch.topk(scores, k=top_k).indices.tolist()
+
+    def _rrf_fusion(self, query: str, k: int, rrf_k: int = 60) -> list[int]:
+        """
+        Combine the ranking BM25 and Semantic with a reciprocal rankfusion
+        args:
+            rrf_k=60: is the standard damping constant established by Cormack.
+            It prevents top-ranked items (rank 1) from overwhelmingly domina-
+            ting items ranked closely behind.
+            (rrf_k = costante di smorzamento standard)
+        Main formula:
+                                    1                     1
+            RRF_Score(d) = ────────────────── + ───────────────────────
+                            60 + rank_BM25(d)    60 + rank_Semantic(d)
+        """
+        candidate_count = min(max(k * 2, 50), len(self.chunks))
+
+        # get the indices for every RAG strategy algorithms
+        bm25_ranks = self._get_bm25_indices(query, k=candidate_count)
+        semantic_ranks = self._get_semantic_indices(query, k=candidate_count)
+
+        # Avoid a crash due to a KeyError by assigning a default value of 0.0
+        # if chunk_idx is not present
+        rrf_scores: dict[int, float] = defaultdict(float)
+
+        # rank is the position of the chunk based on the previous rag system
+        # scoring. if the same chank_idx will be already present in rrf_scores
+        # the chunk gets an additional score boost based on its rank
+        for rank, chunk_idx in enumerate(bm25_ranks, start=1):
+            rrf_scores[chunk_idx] += 1.0 / (rrf_k + rank)
+        for rank, chunk_idx in enumerate(semantic_ranks, start=1):
+            rrf_scores[chunk_idx] += 1.0 / (rrf_k + rank)
+
+        sorted_indices = sorted(
+            rrf_scores.keys(),
+            key=lambda idx: rrf_scores[idx],
+            reverse=True,
         )
-        top_k_scores = sorted_scores[:k]
+        return sorted_indices[:k]
 
-        results: list[MinimalSource] = []
-        for index, score in top_k_scores:
-            chunk = self.chunks[index]
-            source = MinimalSource(
-                file_path=chunk["file_path"],
-                first_character_index=chunk["first_character_index"],
-                last_character_index=chunk["last_character_index"],
-            )
-            results.append(source)
+    def _to_minimal_source(self, chunk_idx: int) -> MinimalSource:
+        chunk = self.chunks[chunk_idx]
+        return MinimalSource(
+            file_path=chunk["file_path"],
+            first_character_index=chunk["first_character_index"],
+            last_character_index=chunk["last_character_index"],
+        )
 
-        return results
+    def retrieve(self, query: str, k: int = 10) -> list[MinimalSource]:
+        """"""
+        if not query or not query.strip() or k <= 0:
+            return []
+
+        if self.vectors is not None:
+            indices = self._rrf_fusion(query, k)
+        else:
+            indices = self._get_bm25_indices(query, k)
+
+        return [self._to_minimal_source(idx) for idx in indices]
     
     # Method ALIAS
     search = retrieve

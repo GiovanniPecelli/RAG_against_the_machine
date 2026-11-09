@@ -1,188 +1,276 @@
 # Next Steps: Integrating Semantic & Hybrid Retrieval
 
-This document outlines the step-by-step roadmap to integrate **Bonus 1 (Semantic Embeddings)** and **Bonus 2 (Hybrid Retrieval)** into the project without modifying or breaking any mandatory baseline behavior or time constraints.
+This document outlines the step-by-step roadmap and current implementation status for integrating **Bonus 1 (Semantic Embeddings)** and **Bonus 2 (Hybrid Retrieval)** into the project without modifying or breaking any mandatory baseline behavior or time constraints.
+
+---
+
+## Progress Dashboard
+
+| Component / Step | Target File | Status | Notes / Current State |
+| :--- | :--- | :---: | :--- |
+| **Arch. Isolation Strategy** | `__main__.py`, `indexer.py` | ✅ **Completed** | `--semantic` is opt-in (default: `False`). Indexing baseline strictly $\le 5$ min. |
+| **Step 1: Indexer Updates** | `src/rag_against_the_machine/indexer.py` | ✅ **Completed** | Generates `vectors.npy` via `Embedder.embedding_encoder()`. Exports TSVs for TF Projector. |
+| **Step 2: Retriever Architecture** | `src/rag_against_the_machine/retriever.py` | 🟡 **Action Needed** | Internal rankers (`_get_bm25_indices`, `_get_semantic_indices`, `_to_minimal_source`) are complete. **Needs `mode` parameter** in `retrieve()` and `search_dataset()`. |
+| **Step 3: RRF Fusion** | `src/rag_against_the_machine/retriever.py` | ✅ **Completed** | Cormack formula ($k=60$) implemented with candidate pooling `min(max(k*2, 50), N)`. |
+| **Step 4: CLI Integration** | `src/rag_against_the_machine/__main__.py` | 🟡 **Action Needed** | `index --semantic` is done. **Needs `--mode` parameter** exposed in `search` and `search_dataset`. |
+| **Step 5: Verification & Recall** | Evaluation Suite | ⏳ **Pending Execution** | Run benchmark matrix across BM25, Semantic, and Hybrid modes on public datasets. |
 
 ---
 
 ## Table of Contents
 1. [Architectural Isolation Strategy](#1-architectural-isolation-strategy)
-2. [Step 1: Indexer Updates (`indexer.py`)](#2-step-1-indexer-updates-indexerpy)
-3. [Step 2: Retriever Architecture & Index Helpers (`retriever.py`)](#3-step-2-retriever-architecture--index-helpers-retrieverpy)
-4. [Step 3: Reciprocal Rank Fusion (RRF) Implementation (Bonus 2: Hybrid Search)](#4-step-3-reciprocal-rank-fusion-rrf-implementation-bonus-2-hybrid-search)
-5. [Step 4: CLI Integration (`__main__.py`)](#5-step-4-cli-integration-__main__py)
-6. [Step 5: Verification & Recall Comparison](#6-step-5-verification--recall-comparison)
+2. [Step 1: Indexer Updates (`indexer.py`)](#2-step-1-indexer-updates-indexerpy) — *(Completed)*
+3. [Step 2: Retriever Architecture & Index Helpers (`retriever.py`)](#3-step-2-retriever-architecture--index-helpers-retrieverpy) — *(Action Required)*
+4. [Step 3: Reciprocal Rank Fusion (`retriever.py`)](#4-step-3-reciprocal-rank-fusion-rrf-implementation-bonus-2-hybrid-search) — *(Completed)*
+5. [Step 4: CLI Integration (`__main__.py`)](#5-step-4-cli-integration-__main__py) — *(Action Required)*
+6. [Step 5: Verification & Recall Comparison Matrix](#6-step-5-verification--recall-comparison-matrix) — *(Pending)*
+7. [Immediate Action Checklist](#7-immediate-action-checklist)
 
 ---
 
 ## 1. Architectural Isolation Strategy
 
 ### The 5-Minute Indexing Constraint
-* **The Mandatory Rule:** Chapter VII strictly enforces indexing $\le 5$ minutes on CPU.
-* **The Reality:** BM25 indexes the ~12,500 chunks in **15 seconds**. Computing neural embeddings for 12,500 chunks on pure CPU takes **8–10 minutes**.
-* **The Solution:** Semantic embedding computation must be **opt-in** via an optional CLI parameter (`--semantic`, default: `False`). The standard evaluation command (`uv run python -m src index`) will always remain pure BM25, guaranteeing evaluation compliance.
+* **The Mandatory Rule:** Chapter VII strictly enforces indexing time $\le 5$ minutes on CPU.
+* **The Reality:** BM25 indexes the ~12,500 chunks in **~15 seconds**. Computing neural embeddings for 12,500 chunks on pure CPU takes **8–10 minutes**.
+* **The Implementation:**
+  - Semantic embedding computation is strictly **opt-in** via `--semantic True`.
+  - Default execution: `uv run python -m src index` builds only the lexical BM25 index (`index.pkl`), guaranteeing evaluation compliance under the 5-minute limit.
 
 ---
 
-## 2. Step 1: Indexer Updates (`indexer.py`)
+## 2. Step 1: Indexer Updates (`indexer.py`) — `[COMPLETED]`
 
-### What Needs to be Done:
-1. **Import `Embedder`** in `indexer.py`.
-2. **Add a semantic generation method** (`build_semantic_index`):
-   - Extracts all chunk texts: `texts = [c["text"] for c in self.all_chunks]`.
-   - *Note on file types:* Embeddings are computed for **both Python (`.py`) and Markdown (`.md`) chunks** equally. Semantic vectors capture function logic as well as conceptual explanations.
-   - Computes vectors via `Embedder.encode(texts, batch_size=32)`.
-   - Saves the tensor matrix to `data/processed/vector_index.pt` using `torch.save()`.
-3. **Add `--semantic` argument to `Indexer.build(semantic: bool = False)`**:
-   - If `semantic=False`: builds and saves only BM25 (`index.pkl`).
-   - If `semantic=True`: builds BM25 and additionally generates and saves `vector_index.pt`.
+### Implementation Summary:
+1. **`Embedder` Integration:** Imported and initialized in `Indexer`.
+2. **Batch Text Extraction (`text_extraction`):**
+   - Efficient list comprehension extracting chunk text slices across all Python (`.py`) and Markdown (`.md`) chunks:
+     ```python
+     def text_extraction(self) -> list[str]:
+         return [chunk["text"] for chunk in self.all_chunks]
+     ```
+3. **Semantic Embedding Encoding & Storage (`save` & `build`):**
+   - Generated using `self.embedder.embedding_encoder(texts=...)` in batches of 32 with L2 normalization.
+   - Saved as a NumPy array: `data/processed/vectors.npy`.
+   - **Bonus Visualization:** Automatically outputs `vectors.tsv` and `metadata.tsv` to `data/processed/tf_projector/` for 3D PCA/t-SNE visualization via TensorFlow Embedding Projector.
+4. **Conditional Flag:** `Indexer.build(semantic: bool = False)` builds only BM25 unless `semantic=True`.
 
 ---
 
-## 3. Step 2: Retriever Architecture & Index Helpers (`retriever.py`)
+## 3. Step 2: Retriever Architecture & Index Helpers (`retriever.py`) — `[ACTION REQUIRED]`
 
-### The Architecture Challenge:
-Currently, `retrieve()` directly instantiates and returns `list[MinimalSource]`. If we want to combine BM25 and Semantic results using RRF, we need the raw ranked candidate positions **before** they are converted into `MinimalSource` objects.
-
-### The Solution: Internal Integer Index Helpers
-Decouple candidate ranking (integer chunk indices) from object serialization (`MinimalSource`).
+### Architecture Workflow:
 
 ```
                               [ User Query ]
                                     │
-               ┌────────────────────┴────────────────────┐
-               │                                         │
-        mode="bm25"                              mode="semantic"
-               │                                         │
-               ▼                                         ▼
-     _get_bm25_indices()                     _get_semantic_indices()
-    [chunk_42, chunk_105]                      [chunk_105, chunk_99]
-               │                                         │
-               └────────────────────┬────────────────────┘
-                                    │ (if mode="hybrid")
-                                    ▼
-                              _rrf_fusion()
+               ┌────────────────────┼────────────────────┐
+               │ (mode="bm25")      │ (mode="semantic")  │ (mode="hybrid")
+               ▼                    ▼                    │
+      _get_bm25_indices()   _get_semantic_indices()      │
+     [chunk_42, chunk_105]    [chunk_105, chunk_99]      │
+               │                    │                    │
+               │                    │           ┌────────┴────────┐
+               │                    │           ▼                 ▼
+               │                    │   _get_bm25_indices  _get_semantic_indices
+               │                    │           └────────┬────────┘
+               │                    │                    ▼
+               │                    │               _rrf_fusion()
+               │                    │                    │
+               └────────────────────┼────────────────────┘
                                     │
                                     ▼
                          [ Top-K Chunk Indices ]
                                     │
                                     ▼
-                        _to_minimal_source()
+                          _to_minimal_source()
                                     │
                                     ▼
-                        list[MinimalSource]
+                           list[MinimalSource]
 ```
 
-#### Detailed Breakdown of Methods in `Retriever`:
+### Current Status & Changes Needed:
 
-1. **`_get_bm25_indices(query: str, k: int) -> list[int]`**:
-   - Evaluates BM25 scores across chunks.
-   - Returns the sorted list of raw integer chunk indices: `[42, 105, 312, ...]`.
+#### 1. Internal Helpers (Already Implemented):
+* `_get_bm25_indices(query: str, k: int) -> list[int]`: Returns sorted integer indices from CustomBM25 scores.
+* `_get_semantic_indices(query: str, k: int) -> list[int]`: Encodes the query, computes Cosine similarity via dot product against `self.vectors`, and extracts top-$k$ indices using `torch.topk`.
+* `_to_minimal_source(chunk_idx: int) -> MinimalSource`: Converts an internal integer index to a `MinimalSource` object.
 
-2. **`_get_semantic_indices(query: str, k: int) -> list[int]`**:
-   - Encodes query: `query_vec = self.embedder.encode([query])`.
-   - Computes Cosine similarity via dot product: `scores = torch.matmul(self.vector_index, query_vec.T).squeeze(-1)`.
-   - Extracts top-$k$ indices: `torch.topk(scores, k=k).indices.tolist()`.
-   - Returns sorted integer chunk indices: `[105, 99, 42, ...]`.
+#### 2. Public `retrieve()` Method (Requires Modification):
+Currently, `retrieve()` in `retriever.py` does not accept the `mode` parameter; it automatically executes RRF if vectors exist, preventing independent evaluation of BM25 or pure Semantic retrieval.
 
-3. **`_to_minimal_source(chunk_idx: int) -> MinimalSource`**:
-   - Helper that maps a single integer chunk index to its `MinimalSource` model:
-     ```python
-     chunk = self.chunks[chunk_idx]
-     return MinimalSource(
-         file_path=chunk["file_path"],
-         first_character_index=chunk["first_character_index"],
-         last_character_index=chunk["last_character_index"],
-     )
-     ```
-
-4. **Public `retrieve(query: str, k: int = 10, mode: str = "bm25") -> list[MinimalSource]`**:
-   - Dispatches to the appropriate helper based on `mode`:
-     ```python
-     if mode == "bm25":
-         indices = self._get_bm25_indices(query, k)
-     elif mode == "semantic":
-         indices = self._get_semantic_indices(query, k)
-     elif mode == "hybrid":
-         indices = self._rrf_fusion(query, k)
-     else:
-         raise ValueError(f"Unknown retrieval mode: {mode}")
-
-     return [self._to_minimal_source(idx) for idx in indices]
-     ```
-   - **Contract Guaranteed:** Externally, `retrieve()` always returns `list[MinimalSource]`.
-
----
-
-## 4. Step 3: Reciprocal Rank Fusion (RRF) Implementation (Bonus 2: Hybrid Search)
-
-### Why Raw Scores Cannot be Added Directly:
-* **BM25 Scores:** Unbounded positive numbers $[0, \infty)$ (e.g., $18.4$, $32.1$).
-* **Semantic Scores:** Cosine similarities bounded to $[-1.0, 1.0]$ (e.g., $0.85$).
-* Direct addition is meaningless due to incompatible scale distributions.
-
-### How RRF Operates on Integer Indices:
-RRF evaluates each chunk solely based on its ordinal placement (1st, 2nd, 3rd) in each candidate ranking:
-
-$$\text{RRF\_Score}(d) = \sum_{m \in \{\text{BM25}, \text{Semantic}\}} \frac{1}{60 + \text{rank}_m(d)}$$
-
-#### Concrete Implementation of `_rrf_fusion`:
+**Target Implementation:**
 ```python
-def _rrf_fusion(self, query: str, k: int, rrf_k: int = 60) -> list[int]:
-    # Retrieve top candidates from both engines (retrieve more candidates, e.g., 2 * k)
-    bm25_indices = self._get_bm25_indices(query, k=k * 2)
-    semantic_indices = self._get_semantic_indices(query, k=k * 2)
+def retrieve(
+    self,
+    query: str,
+    k: int = 10,
+    mode: str = "bm25",
+) -> list[MinimalSource]:
+    """
+    Retrieve top-k sources using the specified retrieval strategy.
+    
+    Modes:
+      - 'bm25': Pure lexical BM25 retrieval.
+      - 'semantic': Pure dense semantic retrieval (requires vectors.npy).
+      - 'hybrid': Reciprocal Rank Fusion combining BM25 and Semantic.
+    """
+    if not query or not query.strip() or k <= 0:
+        return []
 
-    rrf_scores: dict[int, float] = defaultdict(float)
+    mode = mode.lower()
+    if mode == "bm25":
+        indices = self._get_bm25_indices(query, k)
+    elif mode == "semantic":
+        if self.vectors is None:
+            raise ValueError(
+                "Semantic mode requested but vectors.npy is not loaded. "
+                "Run 'index --semantic True' first."
+            )
+        indices = self._get_semantic_indices(query, k)
+    elif mode == "hybrid":
+        if self.vectors is not None:
+            indices = self._rrf_fusion(query, k)
+        else:
+            print("Warning: Semantic vectors not found. Falling back to BM25.")
+            indices = self._get_bm25_indices(query, k)
+    else:
+        raise ValueError(
+            f"Unknown retrieval mode: '{mode}'. Choose from 'bm25', 'semantic', 'hybrid'."
+        )
 
-    # 1. Accumulate points from BM25 ranking
-    for rank, idx in enumerate(bm25_indices):
-        rrf_scores[idx] += 1.0 / (rrf_k + rank + 1)
-
-    # 2. Accumulate points from Semantic ranking
-    for rank, idx in enumerate(semantic_indices):
-        rrf_scores[idx] += 1.0 / (rrf_k + rank + 1)
-
-    # 3. Sort chunk indices descending by combined RRF score
-    sorted_indices = sorted(rrf_scores, key=rrf_scores.get, reverse=True)
-    return sorted_indices[:k]
+    return [self._to_minimal_source(idx) for idx in indices]
 ```
 
-* **Consensus Chunks:** Chunks ranked highly by both BM25 and Semantic search receive two reciprocal bonuses and jump to the top.
-* **Complementary Chunks:** Chunks discovered only by one system (e.g., exact identifier or conceptual synonym) remain preserved in the top results.
+#### 3. `search_dataset()` Method (Requires Modification):
+Update signature and call site to pass `mode`:
+```python
+def search_dataset(
+    self,
+    dataset_path: str,
+    k: int = 10,
+    mode: str = "bm25",
+    save_directory: str = "data/output/search_results/UnansweredQuestions",
+) -> None:
+    ...
+    for item in tqdm(questions):
+        sources = self.retrieve(item["question"], k=k, mode=mode)
+    ...
+```
 
 ---
 
-## 5. Step 4: CLI Integration (`__main__.py`)
+## 4. Step 3: Reciprocal Rank Fusion (RRF) Implementation (`retriever.py`) — `[COMPLETED]`
 
-### Required CLI Changes:
-1. **Update `index` command**:
+### Implementation Summary:
+* **Mathematical Formula:** Standard Cormack reciprocal rank with smoothing constant $k_0 = 60$:
+  $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{BM25}, \text{Semantic}\}} \frac{1}{60 + \text{rank}_m(d)}$$
+* **Candidate Pool Optimization:**
+  Retrieves a dynamically sized candidate pool: `candidate_count = min(max(k * 2, 50), len(self.chunks))`.
+* **Reciprocal Scoring:** Accumulates points across ranks $1 \dots N$ for both lexical and semantic rankings. Chunks ranked by both models receive a dual-bonus score boost.
+
+---
+
+## 5. Step 4: CLI Integration (`__main__.py`) — `[ACTION REQUIRED]`
+
+### CLI Updates Required:
+
+1. **`index` Command** — *(Already Implemented)*
    ```bash
+   # Standard BM25 (Default):
+   uv run python -m src index --max_chunk_size 2000
+
+   # Bonus: BM25 + Semantic Vectors:
    uv run python -m src index --max_chunk_size 2000 --semantic True
    ```
-2. **Update `search` and `search_dataset` commands**:
-   Add `--mode` argument (default: `"bm25"`):
+
+2. **`search` Command** — *(Needs `--mode` argument)*
+   Update `search` in `__main__.py`:
+   ```python
+   def search(
+       self,
+       query: str,
+       k: int = 10,
+       mode: str = "bm25",
+       processed_dir: str = "data/processed",
+   ) -> None:
+       ...
+       results = retriever.retrieve(query, k=k, mode=mode)
+   ```
+   CLI Usage:
    ```bash
-   # Mandatory Lexical search (default):
-   uv run python -m src search --query "..." --k 10 --mode bm25
+   uv run python -m src search --query "How is attention computed in vLLM?" --k 10 --mode bm25
+   uv run python -m src search --query "How is attention computed in vLLM?" --k 10 --mode semantic
+   uv run python -m src search --query "How is attention computed in vLLM?" --k 10 --mode hybrid
+   ```
 
-   # Bonus 1: Semantic search:
-   uv run python -m src search --query "..." --k 10 --mode semantic
-
-   # Bonus 2: Hybrid search (BM25 + Semantic via RRF):
-   uv run python -m src search --query "..." --k 10 --mode hybrid
+3. **`search_dataset` Command** — *(Needs `--mode` argument)*
+   Update `search_dataset` in `__main__.py`:
+   ```python
+   def search_dataset(
+       self,
+       dataset_path: str,
+       k: int = 10,
+       mode: str = "bm25",
+       save_directory: str = "data/output/search_results/UnansweredQuestions",
+       processed_dir: str = "data/processed",
+   ) -> None:
+       ...
+       retriever.search_dataset(
+           dataset_path=dataset_path,
+           k=k,
+           mode=mode,
+           save_directory=save_directory,
+       )
    ```
 
 ---
 
-## 6. Step 5: Verification & Recall Comparison
+## 6. Step 5: Verification & Recall Comparison Matrix — `[PENDING]`
 
-Once implemented, evaluate all three retrieval modes against public datasets using:
+### Benchmarking Protocol
+
+Run the evaluation pipeline across all three modes for both documentation and code datasets:
+
+#### 1. Generate Search Results
 ```bash
+# Documentation Dataset (dataset_docs_public.json)
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode bm25 --k 10 --save_directory data/output/search_results_bm25/UnansweredQuestions
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode semantic --k 10 --save_directory data/output/search_results_semantic/UnansweredQuestions
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode hybrid --k 10 --save_directory data/output/search_results_hybrid/UnansweredQuestions
+
+# Code Dataset (dataset_code_public.json)
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode bm25 --k 10 --save_directory data/output/search_results_bm25/UnansweredQuestions
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode semantic --k 10 --save_directory data/output/search_results_semantic/UnansweredQuestions
+uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode hybrid --k 10 --save_directory data/output/search_results_hybrid/UnansweredQuestions
+```
+
+#### 2. Evaluate Recall@k
+```bash
+# Example evaluation command:
 uv run python -m src evaluate \
-  --student_search_results_path data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+  --student_search_results_path data/output/search_results_hybrid/UnansweredQuestions/dataset_docs_public.json \
   --dataset_path data/datasets/AnsweredQuestions/dataset_docs_public.json
 ```
-Compare Recall@5 across:
-- **BM25 only** (Baseline: ~81.0% docs / ~60.6% code)
-- **Semantic only** (Captures synonyms, intent, conceptual questions)
-- **Hybrid (RRF)** (Combines exact identifier matching with conceptual synonyms for maximum overall Recall)
+
+#### 3. Target Benchmark Comparison Table
+
+| Dataset | Metric | BM25 (Baseline) | Semantic Only | Hybrid (RRF) | Delta (Hybrid vs BM25) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Documentation** | **Recall@1** | TBD | TBD | TBD | TBD |
+| | **Recall@3** | TBD | TBD | TBD | TBD |
+| | **Recall@5** | ~81.0% | TBD | TBD | TBD |
+| | **Recall@10** | TBD | TBD | TBD | TBD |
+| **Code** | **Recall@1** | TBD | TBD | TBD | TBD |
+| | **Recall@3** | TBD | TBD | TBD | TBD |
+| | **Recall@5** | ~60.6% | TBD | TBD | TBD |
+| | **Recall@10** | TBD | TBD | TBD | TBD |
+
+---
+
+## 7. Immediate Action Checklist
+
+- [ ] **Action 1 (`retriever.py`)**: Add `mode: str = "bm25"` parameter to `Retriever.retrieve()` and validate modes (`"bm25"`, `"semantic"`, `"hybrid"`).
+- [ ] **Action 2 (`retriever.py`)**: Add `mode: str = "bm25"` to `Retriever.search_dataset()` and forward it to `self.retrieve()`.
+- [ ] **Action 3 (`__main__.py`)**: Expose `--mode` parameter in `RAGCLI.search()` and `RAGCLI.search_dataset()`.
+- [ ] **Action 4 (Benchmark)**: Run dataset generation and record final Recall metrics in the comparison table above.
