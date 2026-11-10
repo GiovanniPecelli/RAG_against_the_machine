@@ -240,6 +240,15 @@ class RAGCLI:
                     if top_k:
                         print(f"  Trovato: {top_k[0].get('file_path')}")
 
+        total_evaluated = len(recalls.get(k_values[0], []))
+        if total_evaluated == 0:
+            print(
+                f"\nError: No ground-truth sources found in '{dataset_path}'. "
+                "Ensure you pass a dataset containing reference answers and sources "
+                "(e.g., from 'data/datasets/AnsweredQuestions/')."
+            )
+            return
+
         print("\nEvaluation Results")
         print("=" * 40)
         formatted = "  ".join(

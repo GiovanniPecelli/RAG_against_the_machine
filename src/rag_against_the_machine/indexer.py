@@ -69,9 +69,9 @@ class Indexer:
 
         print("\nTokenizing the chunks ...")
         for chunk in tqdm(self.all_chunks):
-            tokens = self.tokenizer.tokenize(chunk["text"])
-            tokenized_corpus.append(tokens)
-
+            text_tokens = self.tokenizer.tokenize(chunk["text"])
+            path_tokens = self.tokenizer.tokenize(chunk["file_path"])
+            tokenized_corpus.append(path_tokens + text_tokens)
         return tokenized_corpus
 
     def text_extraction(self) -> list[str]:
@@ -144,7 +144,7 @@ class Indexer:
         self.collect_chunks()
 
         # Tokenizing chunks
-        tokenized_corpus = self.tokenize_chunks()
+        tokenized_corpus: list[list[str]] = self.tokenize_chunks()
 
         # Building the bm25 algorithm
         self.bm25 = CustomBM25(tokenized_corpus)

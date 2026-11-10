@@ -2,8 +2,9 @@ from pathlib import Path
 
 
 class Chunker:
-    def __init__(self, max_chunk_size: int = 2000):
+    def __init__(self, max_chunk_size: int = 2000, overlap_size: int = 0):
         self.max_chunk_size = max_chunk_size
+        self.overlap_size = overlap_size
 
     def chunk_file(self, file_path: Path) -> list[dict]:
         """
@@ -75,52 +76,45 @@ class Chunker:
         keyworks: tuple
     ) -> list[dict]:
         """Split Python by classes and functions."""
-        chunk: list[dict] = []
-        current_text = ""
-        chunk_start_index = 0
+        chunks: list[dict] = []
+        current_lines: list[tuple[int, str]] = []
+        current_len = 0
+        current_index: int = 0
 
         lines = content.splitlines(keepends=True)
-        current_index: int = 0
         for line in lines:
+            line_len = len(line)
             start_line_index = current_index
 
             # ================================================================
             #            SPECIAL CASE: IF LINE > MAX_CHUNK_SIZE
             # ================================================================
-            if len(line) > self.max_chunk_size:
-                if current_text:
+            if line_len > self.max_chunk_size:
+                if current_lines:
+                    chunk_text = "".join(l for _, l in current_lines)
                     chunk.append({
                         "file_path": normalized_path,
-                        "text": current_text,
-                        "first_character_index": chunk_start_index,
-                        "last_character_index": chunk_start_index + len(
-                            current_text
+                        "text": chunk_text,
+                        "first_character_index": current_lines[0][0],
+                        "last_character_index": (
+                            current_lines[0][0] + len(chunk_text)
                         ),
                     })
-                    current_text = ""
+                    current_lines = []
+                    current_len = 0
 
-                for sub_start in range(0, len(line), self.max_chunk_size):
+                for sub_start in range(0, line_len, self.max_chunk_size):
                     sub_text = line[
                         sub_start : sub_start + self.max_chunk_size
                     ]
-                    sub_first_idx = current_index + sub_start
-
-                    if len(sub_text) == self.max_chunk_size:
-                        chunk.append({
-                            "file_path": normalized_path,
-                            "text": sub_text,
-                            "first_character_index": sub_first_idx,
-                            "last_character_index": sub_first_idx + len(
-                                sub_text
-                            ),
-                        })
-                        chunk_start_index = sub_first_idx + len(sub_text)
-                    else:
-                        # IF the residual text is less then max_chunk_size
-                        current_text = sub_text
-                        chunk_start_index = sub_first_idx
-
-                current_index += len(line)
+                    sub_idx = start_line_index + sub_start
+                    chunks.append({
+                        "file_path": normalized_path,
+                        "text": sub_text,
+                        "first_character_index": sub_idx,
+                        "last_character_index": sub_idx + len(sub_text),
+                    })
+                current_index += line_len
                 continue
 
             # ================================================================
@@ -128,39 +122,53 @@ class Chunker:
             # ================================================================
             is_new_header = line.lstrip().startswith(keyworks)
             would_overflow = (
-                (len(current_text) + len(line)) > self.max_chunk_size
+                (current_len + line_len) > self.max_chunk_size
             )
-
             should_split = (
-                (is_new_header and len(current_text) >= 200) or would_overflow
-            )
+                (
+                    is_new_header and current_len >= 1000
+                ) or would_overflow)
 
             # NEW CHUNK -> if there is an header or would overflow
-            if should_split and current_text:
-                chunk.append({
+            if should_split and current_lines:
+                chunk_text = "".join(l for _, l in current_lines)
+                chunks.append({
                     "file_path": normalized_path,
-                    "text": current_text,
-                    "first_character_index": chunk_start_index,
-                    "last_character_index": chunk_start_index + len(
-                        current_text
+                    "text": chunk_text,
+                    "first_character_index": current_lines[0][0],
+                    "last_character_index": (
+                        current_lines[0][0] + len(chunk_text)
                     ),
                 })
-                # Reset the variable for the next chunk
-                current_text = ""
-                chunk_start_index = start_line_index
 
-            current_text += line
-            current_index += len(line)
+                # SLIDING WINDOW: save the last lines to create chunks overlap
+                overlap_lines = []
+                acc_overlap = 0
+                for start_idx, prev_line in reversed(current_lines):
+                    if acc_overlap + len(prev_line) > self.overlap_size:
+                        break
 
-        if current_text:
-            chunk.append({
+                    # Restoring sequential sorting
+                    overlap_lines.insert(0, (start_idx, prev_line))
+                    acc_overlap += len(prev_line)
+
+                current_lines = overlap_lines
+                current_len = acc_overlap
+
+            current_lines.append((start_line_index, line))
+            current_len += line_len
+            current_index += line_len
+
+        if current_lines:
+            chunk_text = "".join(l for _, l in current_lines)
+            chunks.append({
                 "file_path": normalized_path,
-                "text": current_text,
-                "first_character_index": chunk_start_index,
-                "last_character_index": chunk_start_index + len(current_text),
+                "text": chunk_text,
+                "first_character_index": current_lines[0][0],
+                "last_character_index": current_lines[0][0] + len(chunk_text),
             })
 
-        return chunk
+        return chunks
 
 
 if __name__ == "__main__":

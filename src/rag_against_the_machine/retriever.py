@@ -221,14 +221,24 @@ class Retriever:
         # {"question_id": "value_id",
         #  "question": "query_str"}
         questions: list[dict] = data["rag_questions"]
+        if not questions:
+            print(f"Warning: '{dataset_path}' contains zero questions.")
+            return
 
         all_results: list[MinimalSearchResults] = []
         for item in tqdm(questions):
-            sources = self.retrieve(item["question"], k=k)
+            if not isinstance(item, dict) or "question_id" not in item:
+                continue
+
+            q_text = item["question"]
+            if not isinstance(q_text, str) or not q_text.strip():
+                sources = []
+            else:
+                sources = self.retrieve(q_text, k=k)
 
             item_result = MinimalSearchResults(
                 question_id=item["question_id"],
-                question=item["question"],
+                question=q_text,
                 retrieved_sources=sources
             )
 
@@ -243,11 +253,13 @@ class Retriever:
         # ====================================================================
         #                   Saving Output in save_directory
         # ====================================================================
-        save_dir = Path(save_directory)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        # ds_path.name take the last name in the Path
-        output_file = save_dir / ds_path.name
+        try:
+            save_dir = Path(save_directory)
+            save_dir.mkdir(parents=True, exist_ok=True)
+            output_file = save_dir / ds_path.name
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(output_data.model_dump_json(indent=2))
-        print(f"Saved student_search_results to {output_file}")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(output_data.model_dump_json(indent=2))
+            print(f"Saved student_search_results to {output_file}")
+        except Exception as e:
+            print(f"Error saving output to '{save_directory}': {e}")
