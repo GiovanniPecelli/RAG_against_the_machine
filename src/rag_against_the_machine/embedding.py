@@ -1,4 +1,5 @@
 from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
 import torch
 
 
@@ -102,7 +103,8 @@ class Embedder:
         all_embeddings: list[torch.Tensor] = []
 
         # take 32(batch_size) chunks a time
-        for i in range(0, len(texts), batch_size):
+        print(f"Generating embeddings for {len(texts)} chunks...")
+        for i in tqdm(range(0, len(texts), batch_size)):
             batch_texts = texts[i : i + batch_size]
 
             # Tokenize batch:

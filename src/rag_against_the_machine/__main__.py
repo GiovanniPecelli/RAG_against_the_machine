@@ -44,8 +44,8 @@ class RAGCLI:
         semantic: bool = False,
     ) -> None:
         """ingest the file and build the BM25 index."""
-        if max_chunk_size <= 0:
-            print("Error: max_chunk_index must be greater than 0")
+        if not 0 < max_chunk_size <= 2000:
+            print("Error: max_chunk_size must be between 1 and 2000.")
             return
 
         raw_path = Path(raw_dir)
@@ -104,18 +104,28 @@ class RAGCLI:
             "data/output/search_results/UnansweredQuestions"
         ),
         processed_dir: str = "data/processed",
+        mode: str = "bm25",
     ) -> None:
-        """Call the retriever to search for the entire dataset"""
+        """
+        Call the retriever to search for the entire dataset
+        3 mode:
+            bm25[def] -> retrieve only using the bm25 > require index.pkl
+            semantic -> retrieve using the semantics > require vectors.npy
+            hybrid -> retrieve mixing both the algorithms
+        """
+        try:
+            retriever = Retriever.load(processed_dir, mode=mode)
+            if not retriever:
+                return
 
-        retriever = Retriever.load(processed_dir)
-        if not retriever:
-            return
-
-        retriever.search_dataset(
-            dataset_path=dataset_path,
-            k=k,
-            save_directory=save_directory
-        )
+            retriever.search_dataset(
+                dataset_path=dataset_path,
+                k=k,
+                save_directory=save_directory,
+                mode=mode
+            )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error: {e}")
 
     def answer(
         self,

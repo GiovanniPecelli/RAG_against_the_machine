@@ -92,7 +92,7 @@ class Chunker:
             if line_len > self.max_chunk_size:
                 if current_lines:
                     chunk_text = "".join(l for _, l in current_lines)
-                    chunk.append({
+                    chunks.append({
                         "file_path": normalized_path,
                         "text": chunk_text,
                         "first_character_index": current_lines[0][0],

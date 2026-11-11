@@ -35,7 +35,6 @@ class Indexer:
         self.chunker = Chunker(max_chunk_size=self.max_chunk_size)
         self.tokenizer = Tokenizer()
         self.bm25: CustomBM25 | None = None
-        self.embedder = Embedder()
 
     def get_target_files(self) -> list[Path]:
         """Finds all .py and .md files in the raw folder."""
@@ -150,6 +149,7 @@ class Indexer:
         self.bm25 = CustomBM25(tokenized_corpus)
 
         if semantic:
+            self.embedder = Embedder()
             extracted_chunk_text = self.text_extraction()
             self.vectors = self.embedder.embedding_encoder(
                 texts=extracted_chunk_text

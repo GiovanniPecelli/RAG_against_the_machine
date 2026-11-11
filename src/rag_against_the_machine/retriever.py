@@ -52,8 +52,18 @@ class Retriever:
         self.embedder: Embedder | None = None
 
     @classmethod
-    def load(cls, processed_dir: str = "data/processed") -> Self | None:
+    def load(
+        cls,
+        processed_dir: str = "data/processed",
+        mode: str = "bm25"
+    ) -> Self | None:
         """Load the chunks and bm25 data form index.pkl file"""
+        valid_modes = {"bm25", "semantic", "hybrid"}
+        if mode not in valid_modes:
+            raise ValueError(
+                f"Unknown mode: {mode}. Choose from: {', '.join(valid_modes)}"
+            )
+
         index_path = Path(processed_dir) / "index.pkl"
         if not index_path.exists():
             print(
@@ -68,12 +78,15 @@ class Retriever:
         vector_file = Path(processed_dir) / "vectors.npy"
         vectors: torch.Tensor | None = None
 
-        if vector_file.exists():
-            try:
-                np_vectors = np.load(vector_file)
-                vectors = torch.from_numpy(np_vectors).float()
-            except Exception as e:
-                print(f"Warning: Failed to load vectors: {e}")
+        if mode in ("semantic", "hybrid"):
+            if not vector_file.exists():
+                raise FileNotFoundError(
+                    f"Semantic vectors not found: {vector_file}. "
+                     "Run index with semantic=True first."
+                )
+
+            np_vectors = np.load(vector_file)
+            vectors = torch.from_numpy(np_vectors).float()
 
         return cls(
             chunks=data["all_chunks"],
@@ -173,15 +186,42 @@ class Retriever:
             last_character_index=chunk["last_character_index"],
         )
 
-    def retrieve(self, query: str, k: int = 10) -> list[MinimalSource]:
-        """"""
+    def retrieve(
+        self,
+        query: str,
+        k: int = 10,
+        mode: str = "bm25"
+    ) -> list[MinimalSource]:
+        """
+        based in the mode choice the correct indices retriever.
+        check if vectors.npy and index.pkl exists and the string passed
+        as mode.
+        """
         if not query or not query.strip() or k <= 0:
             return []
 
-        if self.vectors is not None:
-            indices = self._rrf_fusion(query, k)
-        else:
+        valid_modes = {"bm25", "semantic", "hybrid"}
+        if mode not in valid_modes:
+            raise ValueError(
+                f"Unknown mode: {mode}. Choose from: {', '.join(valid_modes)}"
+            )
+
+        if mode in ("bm25"):
             indices = self._get_bm25_indices(query, k)
+        elif mode in ("semantic"):
+            if self.vectors is None:
+                raise ValueError(
+                    "Semantic vectors are missing. Run "
+                    "'index --semantic=True' before using semantic mode."
+                )
+            indices = self._get_semantic_indices(query, k)
+        elif mode in ("hybrid"):
+            if self.vectors is None:
+                raise ValueError(
+                    "Semantic vectors are missing. Run "
+                    "'index --semantic=True' before using hybrid mode."
+                )
+            indices = self._rrf_fusion(query, k)
 
         return [self._to_minimal_source(idx) for idx in indices]
     
@@ -192,7 +232,8 @@ class Retriever:
         self,
         dataset_path: str,
         k: int = 10,
-        save_directory: str = "data/output/search_results/UnansweredQuestions"
+        save_directory: str = "data/output/search_results/UnansweredQuestions",
+        mode: str = "bm25"
     ) -> None:
         if k <= 0:
             print("Error: k must be greater than 0.")
@@ -221,23 +262,47 @@ class Retriever:
         # {"question_id": "value_id",
         #  "question": "query_str"}
         questions: list[dict] = data["rag_questions"]
+        if not isinstance(questions, list):
+            print(f"Error: 'rag_questions' must be a list")
+            return
         if not questions:
             print(f"Warning: '{dataset_path}' contains zero questions.")
             return
 
         all_results: list[MinimalSearchResults] = []
         for item in tqdm(questions):
-            if not isinstance(item, dict) or "question_id" not in item:
+            if (
+                not isinstance(item, dict)
+                or "question_id" not in item
+                or "question" not in item
+            ):
+                print(f"Warning: skipping malformed question record: {item}.")
                 continue
 
+            q_id = item["question_id"]
             q_text = item["question"]
-            if not isinstance(q_text, str) or not q_text.strip():
+
+            if not isinstance(q_id, str) or not q_id.strip():
+                print(
+                    "Warning: skipping record "
+                    f"with invalid question_id: {item}."
+                )
+                continue
+
+            if not isinstance(q_text, str):
+                print(
+                    "Warning: skipping record "
+                    f"with invalid question: {item}."
+                )
+                continue
+            
+            if not q_text.strip():
                 sources = []
             else:
-                sources = self.retrieve(q_text, k=k)
+                sources = self.retrieve(q_text, k=k, mode=mode)
 
             item_result = MinimalSearchResults(
-                question_id=item["question_id"],
+                question_id=q_id,
                 question=q_text,
                 retrieved_sources=sources
             )
