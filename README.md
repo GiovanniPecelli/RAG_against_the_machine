@@ -103,15 +103,20 @@ Where:
 
 ## 5. Performance Targets & Analysis
 
-In accordance with Chapter VII of the 42 subject, the retrieval engine satisfies the following benchmarks:
+The following BM25 measurements were collected in the current development
+workspace. Recall was measured with the project's `evaluate` command against
+the answered public datasets. Timing includes command startup; the 200-query
+search timing also includes loading the index and writing the result JSON. The
+throughput batch combined the 100 documentation and 99 code questions, then
+repeated one query to reach 200.
 
-| Benchmark Metric | Mandatory Threshold | Implementation Approach |
+| Benchmark Metric | Mandatory Threshold | Measured Result |
 | :--- | :--- | :--- |
-| **Documentation Recall@5** | $\ge 80\%$ | Tuned BM25 with semantic header preservation |
-| **Code Recall@5** | $\ge 50\%$ | Function/class syntactic splitting preserving identifiers |
-| **Indexing Throughput** | $\le 5$ minutes | Vectorized Counter frequency tables, pre-calculated IDF |
-| **Search Throughput** | $\le 90$s for 200 questions | Fast in-memory dot-product scoring and Top-$k$ slicing |
-| **Chunk Context Length** | $\le 2000$ characters | Strict chunk boundary validation |
+| **Documentation Recall@5** | $\ge 80\%$ | **84.0%** (100 questions) |
+| **Code Recall@5** | $\ge 50\%$ | **80.8%** (99 questions) |
+| **Indexing Throughput** | $\le 5$ minutes | **5.4 seconds** (1,969 files; 13,349 chunks) |
+| **Search Throughput** | $\le 90$s for 200 questions | **8.8 seconds** (200-question batch) |
+| **Chunk Context Length** | $\le 2000$ characters | Enforced by the configurable chunk-size limit |
 
 ---
 
@@ -231,6 +236,7 @@ uv run python -m src answer_dataset \
 * **Robertson et al. (1994):** *Okapi at TREC-3* — Foundation for the BM25 probabilistic retrieval formula.
 * **vLLM Documentation:** Architecture and configuration reference for the raw repository.
 * **Pydantic v2 Documentation:** Fast serialization and contract validation in Python.
+* **[Python `pickle` Documentation](https://docs.python.org/3/library/pickle.html):** Python's object serialization module, used to save and reload the processed BM25 index in `data/processed/index.pkl`.
 * **Python Fire:** Google library for building CLI interfaces automatically from classes.
 * **Hugging Face `transformers`:** Library used for loading and running `Qwen/Qwen3-0.6B` (`AutoTokenizer`, `AutoModelForCausalLM`). The core autoregressive generation mechanism lives in [`transformers/generation/utils.py`](https://github.com/huggingface/transformers/blob/main/src/transformers/generation/utils.py):
   * `GenerationMixin.generate()` entrypoint: Line **2568**

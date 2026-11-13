@@ -1,84 +1,45 @@
 # Next Steps
 
 This document tracks the work that remains. Semantic embeddings, BM25 and
-semantic retrieval, RRF fusion, dataset-search mode selection, and the
-embedding progress bar are implemented. The indexer now loads the embedding
-model only when semantic indexing is requested, and the CLI limits chunks to
-2,000 characters.
+semantic retrieval, RRF fusion, mode selection in single-query and dataset
+search, and the embedding progress bar are implemented. The indexer now loads
+the embedding model only when semantic indexing is requested, and the CLI
+limits chunks to 2,000 characters.
 
-## Outstanding Work
+## Required Checks Completed
 
-### 1. Expose retrieval mode in single-query search
+The BM25 retrieval targets and performance limits were checked in this
+workspace. Recall was evaluated with the project's `evaluate` command against
+the answered public datasets. The timing measurements include CLI startup and
+result-file writing where applicable.
 
-`search_dataset` accepts `bm25`, `semantic`, and `hybrid`. The single-query
-`search` CLI command still uses its default BM25 mode. Add a `mode` argument to
-`RAGCLI.search` and pass it through to `Retriever.retrieve`, so all three
-strategies can be tried on one question from the CLI.
+| Requirement | Subject target | Measured result | Status |
+| :--- | :--- | :--- | :---: |
+| Documentation Recall@5 | At least 0.800 | 0.840 (100 questions) | Pass |
+| Code Recall@5 | At least 0.500 | 0.808 (99 questions) | Pass |
+| BM25 indexing | At most 5 minutes | 5.4 seconds (1,969 files, 13,349 chunks) | Pass |
+| BM25 retrieval | At most 90 seconds for 200 questions | 8.8 seconds | Pass |
 
-### 2. Finish graceful input-error handling
+## Remaining Work
 
-`search_dataset` now checks the dataset structure and skips malformed question
-records. Review the other CLI paths, especially `answer_dataset` and
-`evaluate`, for missing fields, wrong JSON types, and missing or unreadable
-files. Invalid input should produce a clear message and should not end the CLI
-with an unhandled traceback, as required by the subject.
+### 1. Bonus 3: Incremental Indexing and Artifact Consistency
 
-### 3. Run lint and fix reported issues
+The current indexer rebuilds the full corpus. The implementation should:
 
-`flake8` and `mypy` are now declared as development dependencies. Run the
-required Makefile lint target in the project environment and resolve any
+- Save a content hash for every source file so a later `index` run can identify
+  added, changed, unchanged, and removed files.
+- Re-chunk changed and new files only; reuse chunks and embeddings for
+  unchanged files and discard data belonging to removed files.
+- Rebuild global BM25 statistics from the final combined chunk set, because
+  BM25 statistics depend on the whole corpus.
+- Keep `vectors.npy` rows aligned with `all_chunks`. A BM25-only rebuild must
+  not leave an old vector file that semantic or hybrid mode can mistake for
+  vectors belonging to the new index.
+- Persist enough metadata to verify that `index.pkl` and `vectors.npy` belong
+  to the same corpus version, and save/update them consistently.
+
+### 2. Run lint and fix reported issues
+
+`flake8` and `mypy` are declared as development dependencies. Run the required
+Makefile lint target after the remaining implementation work and resolve any
 reported issues. The strict lint target is optional.
-
-### 4. Complete retrieval and performance evaluation
-
-Run the public documentation and code datasets in all three modes, evaluate
-each result set against its answered dataset, and record the actual metrics
-below. Also record BM25 indexing time and retrieval time for 200 questions.
-
-The subject targets are Recall@5 of at least 80% for documentation and 50% for
-code, indexing within 5 minutes, and retrieval of 200 questions within 90
-seconds.
-
-| Dataset | Metric | BM25 | Semantic | Hybrid (RRF) |
-| :--- | :--- | :---: | :---: | :---: |
-| Documentation | Recall@1 | TBD | TBD | TBD |
-| Documentation | Recall@3 | TBD | TBD | TBD |
-| Documentation | Recall@5 | TBD | TBD | TBD |
-| Documentation | Recall@10 | TBD | TBD | TBD |
-| Code | Recall@1 | TBD | TBD | TBD |
-| Code | Recall@3 | TBD | TBD | TBD |
-| Code | Recall@5 | TBD | TBD | TBD |
-| Code | Recall@10 | TBD | TBD | TBD |
-| Performance | BM25 indexing time | TBD | — | — |
-| Performance | Retrieval time for 200 questions | TBD | TBD | TBD |
-
-Example commands for generating the six result sets:
-
-```bash
-# Documentation questions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode bm25 --k 10 --save_directory data/output/search_results_bm25/UnansweredQuestions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode semantic --k 10 --save_directory data/output/search_results_semantic/UnansweredQuestions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json --mode hybrid --k 10 --save_directory data/output/search_results_hybrid/UnansweredQuestions
-
-# Code questions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode bm25 --k 10 --save_directory data/output/search_results_bm25/UnansweredQuestions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode semantic --k 10 --save_directory data/output/search_results_semantic/UnansweredQuestions
-uv run python -m src search_dataset --dataset_path data/datasets/UnansweredQuestions/dataset_code_public.json --mode hybrid --k 10 --save_directory data/output/search_results_hybrid/UnansweredQuestions
-```
-
-Evaluate each generated file with `evaluate`, using the matching file under
-`data/datasets/AnsweredQuestions/` as the ground truth.
-
-## Deferred: Bonus 3 Incremental Indexing and Artifact Consistency
-
-The current indexer rebuilds the full corpus. Revisit this section when
-implementing incremental indexing:
-
-- Track which chunks and embeddings belong to each source file.
-- When a file changes, update its chunks and embeddings while reusing those
-  for unchanged files.
-- Keep global BM25 statistics consistent with the complete corpus.
-- Detect stale or mismatched artifacts, such as `index.pkl` paired with
-  vectors from a different chunk set, and explain how to rebuild or update.
-- Choose a manifest or equivalent metadata to verify that the index and vector
-  files describe the same corpus version.

@@ -6,12 +6,12 @@ from transformers import (
 from pathlib import Path
 from tqdm import tqdm
 import torch
-import json
 import os
 
 from .model import (
     MinimalSource,
     MinimalAnswer,
+    StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
 
@@ -222,52 +222,29 @@ class Generator:
 
     def generate_answer_dataset(
         self,
-        student_search_results_path: str,
+        search_results_data: StudentSearchResults,
+        input_filename: str,
         save_directory: str = (
             "data/output/search_results_and_answer/UnansweredQuestions"
         ),
     ) -> None:
         """
-        Reads search results JSON, generates answers, and saves
-        StudentSearchResultsAndAnswer.
+        Generates answers from validated search results and saves them as JSON.
         """
-        dataset_path: Path = Path(student_search_results_path)
-        if not dataset_path.exists():
-            print(f"Error: File not found at '{student_search_results_path}'")
-            return
-
-        try:
-            with open(dataset_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except json.JSONDecodeError:
-            print(f"Error: Malformed JSON in '{student_search_results_path}'")
-            return
-        except Exception as e:
-            print(f"Error reading '{student_search_results_path}': {e}")
-            return
-
         answers: list[MinimalAnswer] = []
 
-        for q_item in tqdm(data.get("search_results", [])):
-            question_id = q_item["question_id"]
-            question = q_item["question"]
-
-            sources: list[MinimalSource] = []
-            for source in q_item.get("retrieved_sources", []):
-                sources.append(
-                    MinimalSource(
-                        file_path=source["file_path"],
-                        first_character_index=source["first_character_index"],
-                        last_character_index=source["last_character_index"],
-                    )
-                )
-
-            answer = self.generate_answer(query=question, sources=sources)
+        # q_item is a MinimalSearchResult
+        for q_item in tqdm(search_results_data.search_results):
+            sources = q_item.retrieved_sources
+            answer = self.generate_answer(
+                query=q_item.question,
+                sources=sources,
+            )
 
             answers.append(
                 MinimalAnswer(
-                    question_id=question_id,
-                    question=question,
+                    question_id=q_item.question_id,
+                    question=q_item.question,
                     retrieved_sources=sources,
                     answer=answer,
                 )
@@ -276,16 +253,20 @@ class Generator:
         # ====================================================================
         #                   Saving Output in save_directory
         # ====================================================================
-        k = data.get("k", 5)
         output_data = StudentSearchResultsAndAnswer(
             search_results=answers,
-            k=k,
+            k=search_results_data.k,
         )
 
-        save_dir = Path(save_directory)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        output_file = save_dir / dataset_path.name
+        try:
+            save_dir = Path(save_directory)
+            save_dir.mkdir(parents=True, exist_ok=True)
+            output_file = save_dir / input_filename
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(output_data.model_dump_json(indent=2))
-        print(f"Saved student_search_results_and_answer to {output_file}")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(output_data.model_dump_json(indent=2))
+            print(f"Saved student_search_results_and_answer to {output_file}")
+        except OSError as e:
+            print(
+                f"Error saving answer results to '{save_directory}': {e}"
+            )

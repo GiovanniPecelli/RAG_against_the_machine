@@ -3,10 +3,12 @@ from .indexer import Indexer
 
 from pathlib import Path
 from typing import Any
+from pydantic import ValidationError
 import fire
 import json
 
 from rag_against_the_machine import retriever
+from .model import RagDataset, StudentSearchResults
 
 
 class RAGCLI:
@@ -69,6 +71,7 @@ class RAGCLI:
         query: str,
         k: int = 10,
         processed_dir: str = "data/processed",
+        mode: str = "bm25",
     ) -> None:
         """Search for i top-k snipped for a single question."""
         if not query or not query.strip():
@@ -81,20 +84,23 @@ class RAGCLI:
 
         print(f"Serach for: '{query}' (top {k})...")
 
-        # Load retriever and get the result ["search" is an alias]
-        retriever = Retriever.load(processed_dir)
-        if not retriever:
-            return
+        # Load retriever and get the result calling retrieve
+        try:
+            retriever = Retriever.load(processed_dir, mode=mode)
+            if not retriever:
+                return
 
-        results = retriever.search(query, k=k)
+            results = retriever.retrieve(query, k=k, mode=mode)
 
-        # Results is a list[MinimalSource]
-        for i, source in enumerate(results, start=1):
-            print(
-                f"[{i}] {source.file_path} "
-                f"(chars {source.first_character_index} "
-                f"to {source.last_character_index})"
-            )
+            # Results is a list[MinimalSource]
+            for i, source in enumerate(results, start=1):
+                print(
+                    f"[{i}] {source.file_path} "
+                    f"(chars {source.first_character_index} "
+                    f"to {source.last_character_index})"
+                )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error: {e}")
 
     def search_dataset(
         self,
@@ -169,10 +175,31 @@ class RAGCLI:
         """
         from .generator import Generator
 
+        student_search_results_file = Path(student_search_results_path)
+        if not student_search_results_file.is_file():
+            print(
+                "Error: input file not found: "
+                f"'{student_search_results_path}'"
+            )
+            return
+
+        try:
+            search_results_data = StudentSearchResults.model_validate_json(
+                student_search_results_file.read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError) as e:
+            print(f"Error reading or validating search-results file: {e}")
+            return
+
+        if search_results_data.k <= 0:
+            print("Error: 'k' must be a positive integer.")
+            return
+
         generator = Generator(model_name=model_name)
         generator.generate_answer_dataset(
-            student_search_results_path,
-            save_directory,
+            search_results_data=search_results_data,
+            input_filename=student_search_results_file.name,
+            save_directory=save_directory,
         )
 
     def evaluate(
@@ -182,6 +209,14 @@ class RAGCLI:
         k_values: tuple[int, ...] = (1, 3, 5, 10),
     ) -> None:
         """Evaluate retrieval Recall@k against ground-truth dataset."""
+
+        # any return true if just 1 k in k_values is <= 0
+        if (
+            not k_values
+            or any(not isinstance(k, int) or k <= 0 for k in k_values)
+        ):
+            print("Error: k_values must contain positive integers.")
+            return
 
         # Prediction: program's predicted results
         p_pred = Path(student_search_results_path)
@@ -205,8 +240,17 @@ class RAGCLI:
             print(f"Error reading datasets: {e}")
             return
 
+        try:
+            pred_data = StudentSearchResults.model_validate(
+                pred_data
+            ).model_dump()
+            gt_data = RagDataset.model_validate(gt_data).model_dump()
+        except ValidationError as e:
+            print(f"Error: invalid evaluation data: {e}")
+            return
+
         pred_quest_id: dict = {}
-        for pred_item in pred_data.get("search_results", []):
+        for pred_item in pred_data["search_results"]:
             question_id = pred_item["question_id"]
             pred_sources = pred_item.get("retrieved_sources", [])
             pred_quest_id[question_id] = pred_sources
@@ -220,7 +264,7 @@ class RAGCLI:
         #}
         recalls: dict[int, list[float]] = {k: [] for k in k_values}
 
-        gt_questions = gt_data.get("rag_questions", [])
+        gt_questions = gt_data["rag_questions"]
         for gt_item in gt_questions:
             gt_quest_id = gt_item.get("question_id")
             gt_sources = gt_item.get("sources", [])
@@ -253,8 +297,9 @@ class RAGCLI:
         total_evaluated = len(recalls.get(k_values[0], []))
         if total_evaluated == 0:
             print(
-                f"\nError: No ground-truth sources found in '{dataset_path}'. "
-                "Ensure you pass a dataset containing reference answers and sources "
+                f"\nError: No ground-truth sources found in '{dataset_path}'."
+                " Ensure you pass a dataset "
+                "containing reference answers and sources "
                 "(e.g., from 'data/datasets/AnsweredQuestions/')."
             )
             return

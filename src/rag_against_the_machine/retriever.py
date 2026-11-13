@@ -72,8 +72,41 @@ class Retriever:
             )
             return None
 
-        with open(index_path, "rb") as f:
-            data = pickle.load(f)
+        try:
+            with open(index_path, "rb") as f:
+                data = pickle.load(f)
+        except (
+            OSError,
+            pickle.PickleError,
+            EOFError,
+            AttributeError,
+            ImportError,
+            IndexError,
+        ) as e:
+            print(f"Error loading index '{index_path}': {e}")
+            return None
+
+        if (
+            not isinstance(data, dict)
+            or "bm25" not in data
+            or "all_chunks" not in data
+        ):
+            print(
+                f"Error: index file '{index_path}' must be a dictionary "
+                "containing 'bm25' and 'all_chunks'."
+            )
+            return None
+
+        if (
+            not isinstance(data["all_chunks"], list)
+            or not isinstance(data["bm25"], CustomBM25)
+        ):
+            print(
+                f"Error: index file '{index_path}' contains invalid "
+                "data types for 'bm25' or 'all_chunks'."
+            )
+            return None
+
 
         vector_file = Path(processed_dir) / "vectors.npy"
         vectors: torch.Tensor | None = None
@@ -85,7 +118,23 @@ class Retriever:
                      "Run index with semantic=True first."
                 )
 
-            np_vectors = np.load(vector_file)
+            try:
+                np_vectors = np.load(vector_file)
+            except (OSError, ValueError) as e:
+                print(f"Error loading vectors '{vector_file}': {e}")
+                return None
+
+            if (
+                np_vectors.ndim != 2
+                or np_vectors.shape[0] != len(data["all_chunks"])
+                or np_vectors.shape[1] != 384
+            ):
+                print(
+                    f"Error: vectors in '{vector_file}' are incompatible "
+                    "with the index."
+                )
+                return None
+
             vectors = torch.from_numpy(np_vectors).float()
 
         return cls(
@@ -224,9 +273,6 @@ class Retriever:
             indices = self._rrf_fusion(query, k)
 
         return [self._to_minimal_source(idx) for idx in indices]
-    
-    # Method ALIAS
-    search = retrieve
 
     def search_dataset(
         self,

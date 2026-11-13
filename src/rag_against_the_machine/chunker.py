@@ -24,14 +24,17 @@ class Chunker:
 
         normalized_path: str = file_path.as_posix()
 
-        if file_path.suffix == ".md":
-            return self.chunk_Markdown(content, normalized_path)
-        elif file_path.suffix == ".txt":
-            return self.chunk_text(content, normalized_path)
-        elif file_path.suffix == ".py":
-            return self.chunk_python(content, normalized_path)
+        # a chunks list for a single file
+        file_chunks: list[dict] = []
 
-        return []
+        if file_path.suffix == ".md":
+            file_chunks = self.chunk_Markdown(content, normalized_path)
+        elif file_path.suffix == ".txt":
+            file_chunks = self.chunk_text(content, normalized_path)
+        elif file_path.suffix == ".py":
+            file_chunks = self.chunk_python(content, normalized_path)
+
+        return file_chunks
 
     def chunk_Markdown(
         self,
