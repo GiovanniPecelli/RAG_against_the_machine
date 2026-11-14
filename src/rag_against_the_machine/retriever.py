@@ -30,6 +30,7 @@ import json
 
 from .tokenizer import Tokenizer
 from .embedding import Embedder
+from .indexer import Indexer
 from .bm25 import CustomBM25
 from .model import (
     MinimalSource,
@@ -118,10 +119,29 @@ class Retriever:
                      "Run index with semantic=True first."
                 )
 
+            stored_signature = data.get("vector_chunks_signature")
+            current_signature = Indexer.get_chunks_signature(
+                data["all_chunks"]
+            )
+            if stored_signature != current_signature:
+                print(
+                    "Error: semantic vectors do not match the index. "
+                    "Run 'index --semantic=True' to rebuild them."
+                )
+                return None
+
             try:
                 np_vectors = np.load(vector_file)
             except (OSError, ValueError) as e:
                 print(f"Error loading vectors '{vector_file}': {e}")
+                return None
+
+            stored_vectors_hash = data.get("vectors_hash")
+            loaded_vectors_hash = Indexer.get_vectors_hash(np_vectors)
+            if stored_vectors_hash != loaded_vectors_hash:
+                print(
+                    f"Error: vectors in '{vector_file}' do not match the index."
+                )
                 return None
 
             if (

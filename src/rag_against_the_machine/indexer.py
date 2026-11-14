@@ -79,7 +79,8 @@ class Indexer:
 
         return chunks_by_file
 
-    def get_chunks_signature(self, chunks: list[dict]) -> str:
+    @staticmethod
+    def get_chunks_signature(chunks: list[dict]) -> str:
         """Return a hash for an ordered list of chunks."""
         serialized_chunks = json.dumps(
             chunks,
@@ -89,6 +90,11 @@ class Indexer:
         return hashlib.sha256(
             serialized_chunks.encode("utf-8")
         ).hexdigest()
+
+    @staticmethod
+    def get_vectors_hash(vectors: np.ndarray) -> str:
+        """Return a hash of the vector matrix contents."""
+        return hashlib.sha256(vectors.tobytes()).hexdigest()
 
     def collect_chunks(
         self,
@@ -110,6 +116,7 @@ class Indexer:
             if path in unchanged_files:
                 file_chunks = old_chunks_by_file.get(path, [])
             else:
+                # if the file is changed -> send to chunk_file
                 file_chunks = self.chunker.chunk_file(file_path)
 
             self.all_chunks.extend(file_chunks)
@@ -179,6 +186,16 @@ class Indexer:
             "all_chunks": self.all_chunks,
             "bm25": self.bm25,
             "file_hashes": self.file_hashes,
+            "vector_chunks_signature": (
+                self.get_chunks_signature(self.all_chunks)
+                if self.vectors is not None
+                else None
+            ),
+            "vectors_hash": (
+                self.get_vectors_hash(self.vectors.cpu().numpy())
+                if self.vectors is not None
+                else None
+            ),
         }
         with open(index_file, "wb") as f:
             pickle.dump(data, f)
@@ -251,16 +268,34 @@ class Indexer:
             stored_chunks = previous_data.get("all_chunks")
             if isinstance(stored_chunks, list):
                 previous_chunks = stored_chunks
+
         old_chunks_by_file = self.group_chunks_by_file(previous_chunks)
+
+        stored_vector_signature = None
+        if previous_data is not None:
+            stored_vector_signature = previous_data.get(
+                "vector_chunks_signature"
+            )
+
+        previous_chunks_signature = self.get_chunks_signature(previous_chunks)
+        vectors_match_previous_chunks = (
+            stored_vector_signature == previous_chunks_signature
+        )
 
         # Load previous semantic vectors.
         previous_vectors: torch.Tensor | None = None
         vector_file = self.processed_dir / "vectors.npy"
 
-        if vector_file.is_file():
-            previous_vectors = torch.from_numpy(
-                np.load(vector_file)
-            ).float()
+        if vector_file.is_file() and vectors_match_previous_chunks:
+            # loaded_vectors_array is a numpy array - 2D matrix (chunk, dim)
+            loaded_vectors_array = np.load(vector_file)
+            loaded_vectors_hash = self.get_vectors_hash(loaded_vectors_array)
+            # .get() return None if the key miss
+            stored_vectors_hash = previous_data.get("vectors_hash")
+            if loaded_vectors_hash == stored_vectors_hash:
+                previous_vectors = torch.from_numpy(
+                    loaded_vectors_array
+                ).float()
 
         # Group previous vectors by their source file path
         old_vectors_by_file: dict[str, list[torch.Tensor]] = {}
@@ -270,8 +305,12 @@ class Indexer:
                 print("Warning: old vectors do not match the old chunks.")
                 previous_vectors = None
             else:
+                # zip() pairs items from two sequences by position. Here:
+                # - previous_chunks[0] pairs with previous_vectors[0]
+                # - previous_chunks[1] pairs with previous_vectors[1]
                 for chunk, vector in zip(previous_chunks, previous_vectors):
                     path = chunk["file_path"]
+                    # save all chunk's vectors by file
                     old_vectors_by_file.setdefault(path, []).append(vector)
 
         # Collecting and chunking files
