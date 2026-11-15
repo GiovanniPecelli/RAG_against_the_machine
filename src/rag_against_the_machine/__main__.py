@@ -14,6 +14,22 @@ class RAGCLI:
     """RAG against the machine CLI."""
 
     @staticmethod
+    def _is_positive_int(value: object) -> bool:
+        """Check that a CLI value is a positive integer, excluding booleans.
+
+        Args:
+            value: Value received from the CLI parser.
+
+        Returns:
+            Whether the value is a positive integer and not a boolean.
+        """
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+        )
+
+    @staticmethod
     def _compute_iou(start1: int, end1: int, start2: int, end2: int) -> float:
         """Calculate the intersection-over-union of two character spans.
 
@@ -75,6 +91,12 @@ class RAGCLI:
         Returns:
             None.
         """
+        if not isinstance(max_chunk_size, int) or isinstance(
+            max_chunk_size, bool
+        ):
+            print("Error: max_chunk_size must be an integer.")
+            return
+
         if not 0 < max_chunk_size <= 2000:
             print("Error: max_chunk_size must be between 1 and 2000.")
             return
@@ -117,8 +139,8 @@ class RAGCLI:
             print("Error: The query can't be empty")
             return
 
-        if k <= 0:
-            print("Error: k must be greater than 0.")
+        if not self._is_positive_int(k):
+            print("Error: k must be a positive integer.")
             return
 
         print(f"Serach for: '{query}' (top {k})...")
@@ -168,6 +190,13 @@ class RAGCLI:
         Returns:
             None. Results or errors are reported to the terminal.
         """
+        if not self._is_positive_int(k):
+            print(
+                "Error: k must be a positive integer. Use named CLI options, "
+                "for example '--mode=hybrid', instead of 'mode=hybrid'."
+            )
+            return
+
         try:
             retriever = Retriever.load(processed_dir, mode=mode)
             if not retriever:
@@ -204,8 +233,8 @@ class RAGCLI:
             print("Error: The query can't be empty.")
             return
 
-        if k <= 0:
-            print("Error: k must be greater than 0.")
+        if not self._is_positive_int(k):
+            print("Error: k must be a positive integer.")
             return
 
         retriever = Retriever.load(processed_dir)
@@ -219,6 +248,8 @@ class RAGCLI:
         generator = Generator(model_name=model_name)
         answer_text = generator.generate_answer(query, sources)
         print(f"\n--- Answer ---\n{answer_text}\n")
+        # for source in sources:
+        #     print(source)
 
     def answer_dataset(
         self,
@@ -258,7 +289,7 @@ class RAGCLI:
             print(f"Error reading or validating search-results file: {e}")
             return
 
-        if search_results_data.k <= 0:
+        if not self._is_positive_int(search_results_data.k):
             print("Error: 'k' must be a positive integer.")
             return
 
@@ -288,8 +319,9 @@ class RAGCLI:
 
         # any return true if just 1 k in k_values is <= 0
         if (
-            not k_values
-            or any(not isinstance(k, int) or k <= 0 for k in k_values)
+            not isinstance(k_values, (tuple, list))
+            or not k_values
+            or any(not self._is_positive_int(k) for k in k_values)
         ):
             print("Error: k_values must contain positive integers.")
             return

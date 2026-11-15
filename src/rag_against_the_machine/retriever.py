@@ -323,8 +323,15 @@ class Retriever:
         Returns:
             Ranked source locations matching the query.
         """
-        if not query or not query.strip() or k <= 0:
+        if not query or not query.strip():
             return []
+
+        if (
+            isinstance(k, bool)
+            or not isinstance(k, int)
+            or k <= 0
+        ):
+            raise ValueError("k must be a positive integer.")
 
         valid_modes = {"bm25", "semantic", "hybrid"}
         if mode not in valid_modes:
@@ -369,8 +376,12 @@ class Retriever:
         Returns:
             None. Results are written to ``save_directory``.
         """
-        if k <= 0:
-            print("Error: k must be greater than 0.")
+        if (
+            isinstance(k, bool)
+            or not isinstance(k, int)
+            or k <= 0
+        ):
+            print("Error: k must be a positive integer.")
             return
 
         ds_path = Path(dataset_path)
