@@ -1,12 +1,24 @@
 from pathlib import Path
+from typing import Any
 
 
 class Chunker:
+    """Split source files and preserve their character offsets."""
+
     def __init__(self, max_chunk_size: int = 2000, overlap_size: int = 0):
+        """Set the chunk length and overlap configuration.
+
+        Args:
+            max_chunk_size: Maximum number of characters in a chunk.
+            overlap_size: Number of characters to retain from the prior chunk.
+
+        Returns:
+            None.
+        """
         self.max_chunk_size = max_chunk_size
         self.overlap_size = overlap_size
 
-    def chunk_file(self, file_path: Path) -> list[dict]:
+    def chunk_file(self, file_path: Path) -> list[dict[str, Any]]:
         """
         Reads the file and delegates to the right strategy.
         Cross-platform path normalization:
@@ -14,6 +26,12 @@ class Chunker:
             whereas POSIX/Linux systems use forward slashes ('/').
             with reference paths (e.g., 'data/raw/vllm-0.10.1/docs/...').
             Using .as_posix() guarantees standard forward slashes.
+
+        Args:
+            file_path: Path of the source file to read and split.
+
+        Returns:
+            Chunk dictionaries containing text, path, and character offsets.
         """
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -25,7 +43,7 @@ class Chunker:
         normalized_path: str = file_path.as_posix()
 
         # a chunks list for a single file
-        file_chunks: list[dict] = []
+        file_chunks: list[dict[str, Any]] = []
 
         if file_path.suffix == ".md":
             file_chunks = self.chunk_Markdown(content, normalized_path)
@@ -40,20 +58,36 @@ class Chunker:
         self,
         content: str,
         normalized_path: str
-    ) -> list[dict]:
-        """Split Markdown files by headers (#) and paragraphs."""
+    ) -> list[dict[str, Any]]:
+        """Split Markdown content at headings and size boundaries.
+
+        Args:
+            content: Complete Markdown file contents.
+            normalized_path: POSIX-style path stored with each chunk.
+
+        Returns:
+            Chunk dictionaries with text and source character offsets.
+        """
         return self._slice_files(
             content,
             normalized_path,
-            keyworks=("# ","## ",)
+            keyworks=("# ", "## ",)
         )
 
     def chunk_text(
         self,
         content: str,
         normalized_path: str
-    ) -> list[dict]:
-        """Split Generic Text and config files by (\n) or max chunk size"""
+    ) -> list[dict[str, Any]]:
+        """Split text content at line boundaries and size limits.
+
+        Args:
+            content: Complete text file contents.
+            normalized_path: POSIX-style path stored with each chunk.
+
+        Returns:
+            Chunk dictionaries with text and source character offsets.
+        """
         return self._slice_files(
             content,
             normalized_path,
@@ -64,8 +98,16 @@ class Chunker:
         self,
         content: str,
         normalized_path: str
-    ) -> list[dict]:
-        """Split Python files by headers (class, def and async def)"""
+    ) -> list[dict[str, Any]]:
+        """Split Python source around declarations and size limits.
+
+        Args:
+            content: Complete Python file contents.
+            normalized_path: POSIX-style path stored with each chunk.
+
+        Returns:
+            Chunk dictionaries with text and source character offsets.
+        """
         return self._slice_files(
             content,
             normalized_path,
@@ -76,10 +118,19 @@ class Chunker:
         self,
         content: str,
         normalized_path: str,
-        keyworks: tuple
-    ) -> list[dict]:
-        """Split Python by classes and functions."""
-        chunks: list[dict] = []
+        keyworks: tuple[str, ...]
+    ) -> list[dict[str, Any]]:
+        """Split content using the supplied boundary keywords and size limit.
+
+        Args:
+            content: Complete source text to split.
+            normalized_path: POSIX-style source path attached to each chunk.
+            keyworks: Text markers that begin a new preferred chunk.
+
+        Returns:
+            Chunk dictionaries with text and source character offsets.
+        """
+        chunks: list[dict[str, Any]] = []
         current_lines: list[tuple[int, str]] = []
         current_len = 0
         current_index: int = 0
@@ -108,7 +159,7 @@ class Chunker:
 
                 for sub_start in range(0, line_len, self.max_chunk_size):
                     sub_text = line[
-                        sub_start : sub_start + self.max_chunk_size
+                        sub_start:sub_start + self.max_chunk_size
                     ]
                     sub_idx = start_line_index + sub_start
                     chunks.append({
@@ -145,7 +196,7 @@ class Chunker:
                 })
 
                 # SLIDING WINDOW: save the last lines to create chunks overlap
-                overlap_lines = []
+                overlap_lines: list[tuple[int, str]] = []
                 acc_overlap = 0
                 for start_idx, prev_line in reversed(current_lines):
                     if acc_overlap + len(prev_line) > self.overlap_size:

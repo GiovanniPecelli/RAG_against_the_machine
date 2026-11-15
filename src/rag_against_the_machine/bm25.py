@@ -9,7 +9,7 @@ score of a document (chunk D) given a search query (Q = [q_1, q_2, ..., q_m]).
 
 1. The Scoring Formula:
    For a query Q and a document D:
-   
+
                   /                        f(q_i, D) * (k1 + 1)              \
 Score(D, Q) = SUM | IDF(q_i) * --------------------------------------------- |
                i  \             f(q_i, D) + k1 * (1 - b + b * (|D| / avgdl)) /
@@ -23,11 +23,13 @@ Score(D, Q) = SUM | IDF(q_i) * --------------------------------------------- |
                   avgdl = (sum of all |D|) / N
    - N          : Total number of documents (chunks) in the corpus.
    - k1         : Term frequency saturation parameter (default: 1.5).
-                  Controls how quickly additional occurrences of a term stop 
-                  increasing the score. Prevents keyword repetition from dominating.
+                  Controls how quickly additional occurrences of a term stop
+                  increasing the score. Prevents keyword repetition from
+                  dominating.
    - b          : Document length normalization parameter (default: 0.75).
                   Controls how much longer documents are penalized.
-                  - If b = 1.0: Full length penalty (favors short, dense snippets).
+                  - If b = 1.0: Full length penalty (favors short, dense
+                    snippets).
                   - If b = 0.0: No length penalty (document length is ignored).
 
 2. Inverse Document Frequency (IDF) Formula:
@@ -41,12 +43,13 @@ Score(D, Q) = SUM | IDF(q_i) * --------------------------------------------- |
    - n(q_i)     : Document Frequency — number of chunks containing the word.
    - N          : Total number of chunks.
    - "+ 0.5"    : simply an anti-crash safety airbag avoiding division by 0.
-   
+
    Behavior:
    - If a word appears in almost all chunks (e.g. 'the', 'import'):
      n(q_i) ≈ N  -->  IDF(q_i) ≈ 0  (word is penalized, negligible score).
    - If a word appears in very few chunks (e.g. 'LoraConfig', 'cache_engine'):
-     n(q_i) is small  -->  IDF(q_i) is high (word receives massive score multiplier).
+     n(q_i) is small  -->  IDF(q_i) is high (word receives a large score
+     multiplier).
 
 3. Pipeline Lifecycle:
    - Indexing Phase (Offline):
@@ -60,6 +63,8 @@ import math
 
 
 class CustomBM25:
+    """Rank tokenized corpus chunks with the BM25 relevance formula."""
+
     def __init__(
         self,
         corpus: list[list[str]],
@@ -68,17 +73,28 @@ class CustomBM25:
     ):
         """
         HYPERPARAMETERS ("Tuning Knobs"):
-        In Machine Learning, parameters like k1 and b are called 'Hyperparameters'.
-        The metaphor 'tuning knob' describes adjustable settings used to calibrate
+        In Machine Learning, parameters like k1 and b are called
+        'Hyperparameters'. The metaphor 'tuning knob' describes adjustable
+        settings used to calibrate
         the behavior and sensitivity of the ranking algorithm:
 
         - k1 (default: 1.5): Term Frequency Saturation Knob.
-          Controls the ceiling for word repetition, ensuring diminishing returns
+                  Controls the ceiling for word repetition, ensuring
+                  diminishing returns
           so that repeated words do not dominate the score.
 
         - b (default: 0.75): Length Normalization Penalty Knob.
-          Penalizes chunks that are longer than the average chunk length (avgdl),
+          Penalizes chunks that are longer than the average chunk length
+          (avgdl),
           favoring concise and focused snippets.
+
+        Args:
+            corpus: Tokenized documents, with one token list per chunk.
+            k1: Term-frequency saturation parameter.
+            b: Document-length normalization parameter.
+
+        Returns:
+            None.
         """
         self.k1 = k1
         self.b = b
@@ -93,7 +109,7 @@ class CustomBM25:
         ) if self.corpus_size > 0 else 0.0
 
         self.doc_freqs, self.idf = self._calculate_idf(corpus)
-    
+
     def _calculate_idf(
             self, corpus: list[list[str]]
     ) -> tuple[list[dict[str, int]], dict[str, float]]:
@@ -111,22 +127,28 @@ class CustomBM25:
                 "word_1": 1, mean: only 1 chunk have the word_1
                 "word_2": 2,
             }
+
+        Args:
+            corpus: Tokenized chunks used to calculate document frequencies.
+
+        Returns:
+            A pair containing per-chunk term frequencies and corpus IDF values.
         """
-        doc_frequencies: list[dict] = []
-        word_doc_counts = Counter()
+        doc_frequencies: list[dict[str, int]] = []
+        word_doc_counts: Counter[str] = Counter()
         for chunk in corpus:
             # How many times words are in that chunk
-            freq: dict = Counter(chunk)
+            freq: dict[str, int] = Counter(chunk)
             doc_frequencies.append(freq)
             for word in freq.keys():
                 word_doc_counts[word] += 1
-        
+
         idf = {}
         for word, count in word_doc_counts.items():
             numerator = self.corpus_size - count + 0.5
             denominator = count + 0.5
             idf[word] = math.log(1.0 + (numerator / denominator))
-        
+
         return doc_frequencies, idf
 
     def get_score(self, query: list[str]) -> list[float]:
@@ -138,8 +160,14 @@ class CustomBM25:
         BM25:
             - penality: check the chunk length to avoid spamming
             - tf: Term frequency
+
+        Args:
+            query: Tokenized query terms.
+
+        Returns:
+            One BM25 score for each chunk in the indexed corpus.
         """
-        scores: list = [0.0] * self.corpus_size
+        scores: list[float] = [0.0] * self.corpus_size
 
         for index, chunk_freq in enumerate(self.doc_freqs):
             score = 0.0
@@ -147,7 +175,7 @@ class CustomBM25:
             for word in query:
                 if word not in chunk_freq:
                     continue
-                
+
                 # How many times the word appear in the current chunk
                 freq = chunk_freq[word]
 
@@ -156,7 +184,7 @@ class CustomBM25:
                     self.doc_len[index] / self.avgdl
                 )
                 tf = (freq * (self.k1 + 1)) / (freq + self.k1 * penality)
-                
+
                 # Score Compounding:
                 # If multiple words from the query appear in this chunk,
                 # their individual scores are accumulated together into
@@ -169,6 +197,7 @@ class CustomBM25:
             scores[index] = score
 
         return scores
+
 
 if __name__ == "__main__":
     tokenized_corpus = [

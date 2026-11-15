@@ -21,7 +21,7 @@ eliminating the need to re-parse and re-index the raw files on every query.
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 from tqdm import tqdm
 import numpy as np
 import pickle
@@ -40,12 +40,24 @@ from .model import (
 
 
 class Retriever:
+    """Retrieve source chunks using BM25, semantic search, or RRF fusion."""
+
     def __init__(
         self,
-        chunks: list[dict],
+        chunks: list[dict[str, Any]],
         bm25: CustomBM25,
         vectors: torch.Tensor | None = None
     ) -> None:
+        """Store the loaded corpus index and initialize retrieval helpers.
+
+        Args:
+            chunks: Ordered source chunk records.
+            bm25: Lexical index built for the chunks.
+            vectors: Optional semantic vector matrix aligned with the chunks.
+
+        Returns:
+            None.
+        """
         self.chunks = chunks
         self.bm25 = bm25
         self.vectors = vectors
@@ -58,7 +70,15 @@ class Retriever:
         processed_dir: str = "data/processed",
         mode: str = "bm25"
     ) -> Self | None:
-        """Load the chunks and bm25 data form index.pkl file"""
+        """Load and validate the saved index and requested vector artifacts.
+
+        Args:
+            processed_dir: Directory containing the saved index artifacts.
+            mode: Retrieval mode whose required artifacts should be loaded.
+
+        Returns:
+            A ready retriever, or ``None`` if an artifact is invalid or absent.
+        """
         valid_modes = {"bm25", "semantic", "hybrid"}
         if mode not in valid_modes:
             raise ValueError(
@@ -108,7 +128,6 @@ class Retriever:
             )
             return None
 
-
         vector_file = Path(processed_dir) / "vectors.npy"
         vectors: torch.Tensor | None = None
 
@@ -116,7 +135,7 @@ class Retriever:
             if not vector_file.exists():
                 raise FileNotFoundError(
                     f"Semantic vectors not found: {vector_file}. "
-                     "Run index with semantic=True first."
+                    "Run index with semantic=True first."
                 )
 
             stored_signature = data.get("vector_chunks_signature")
@@ -140,7 +159,8 @@ class Retriever:
             loaded_vectors_hash = Indexer.get_vectors_hash(np_vectors)
             if stored_vectors_hash != loaded_vectors_hash:
                 print(
-                    f"Error: vectors in '{vector_file}' do not match the index."
+                    f"Error: vectors in '{vector_file}' do not match "
+                    "the index."
                 )
                 return None
 
@@ -164,9 +184,14 @@ class Retriever:
         )
 
     def _get_bm25_indices(self, query: str, k: int = 10) -> list[int]:
-        """Indexes chunks with bm25
-        return:
-            sorted index
+        """Rank chunks by their BM25 score for a query.
+
+        Args:
+            query: Search query in natural language or code terms.
+            k: Maximum number of chunk indices to return.
+
+        Returns:
+            Chunk indices ordered from highest to lowest BM25 score.
         """
         tokenized_query = self.tokenizer.tokenize(query)
 
@@ -181,7 +206,15 @@ class Retriever:
         return [idx for idx, _ in indexed_scores[:k]]
 
     def _get_semantic_indices(self, query: str, k: int = 10) -> list[int]:
-        """Indexes chunks with semantic embeddings"""
+        """Rank chunks by cosine similarity to the query embedding.
+
+        Args:
+            query: Search query to encode.
+            k: Maximum number of chunk indices to return.
+
+        Returns:
+            Chunk indices ordered from highest to lowest similarity.
+        """
         if self.vectors is None:
             return []
 
@@ -204,7 +237,7 @@ class Retriever:
         ).squeeze(-1)
 
         # torch.topk(...): is an optimized function provide by PyTorch
-        # that scans each score calculated by the previous line and 
+        # that scans each score calculated by the previous line and
         # exctracts only the top_k values (the nearest -> higher values)
         top_k = min(k, len(self.chunks))
         return torch.topk(scores, k=top_k).indices.tolist()
@@ -221,6 +254,14 @@ class Retriever:
                                     1                     1
             RRF_Score(d) = ────────────────── + ───────────────────────
                             60 + rank_BM25(d)    60 + rank_Semantic(d)
+
+        Args:
+            query: Query used to obtain the BM25 and semantic rankings.
+            k: Number of fused chunk indices to return.
+            rrf_k: Reciprocal-rank damping constant.
+
+        Returns:
+            Chunk indices ordered by their combined reciprocal-rank score.
         """
         candidate_count = min(max(k * 2, 50), len(self.chunks))
 
@@ -248,6 +289,14 @@ class Retriever:
         return sorted_indices[:k]
 
     def _to_minimal_source(self, chunk_idx: int) -> MinimalSource:
+        """Convert an internal chunk record to the output source model.
+
+        Args:
+            chunk_idx: Position of the chunk in ``self.chunks``.
+
+        Returns:
+            A validated source path and character-span record.
+        """
         chunk = self.chunks[chunk_idx]
         return MinimalSource(
             file_path=chunk["file_path"],
@@ -265,6 +314,14 @@ class Retriever:
         based in the mode choice the correct indices retriever.
         check if vectors.npy and index.pkl exists and the string passed
         as mode.
+
+        Args:
+            query: User query to search for.
+            k: Maximum number of source locations to return.
+            mode: Ranking method: ``bm25``, ``semantic``, or ``hybrid``.
+
+        Returns:
+            Ranked source locations matching the query.
         """
         if not query or not query.strip() or k <= 0:
             return []
@@ -301,6 +358,17 @@ class Retriever:
         save_directory: str = "data/output/search_results/UnansweredQuestions",
         mode: str = "bm25"
     ) -> None:
+        """Search each question in a JSON dataset and save validated results.
+
+        Args:
+            dataset_path: JSON dataset path containing RAG questions.
+            k: Maximum number of sources to retrieve per question.
+            save_directory: Directory for the StudentSearchResults JSON file.
+            mode: Ranking method: ``bm25``, ``semantic``, or ``hybrid``.
+
+        Returns:
+            None. Results are written to ``save_directory``.
+        """
         if k <= 0:
             print("Error: k must be greater than 0.")
             return
@@ -327,9 +395,9 @@ class Retriever:
         # Python automatically cast it to a list of dict
         # {"question_id": "value_id",
         #  "question": "query_str"}
-        questions: list[dict] = data["rag_questions"]
+        questions: list[dict[str, Any]] = data["rag_questions"]
         if not isinstance(questions, list):
-            print(f"Error: 'rag_questions' must be a list")
+            print("Error: 'rag_questions' must be a list")
             return
         if not questions:
             print(f"Warning: '{dataset_path}' contains zero questions.")
@@ -361,7 +429,7 @@ class Retriever:
                     f"with invalid question: {item}."
                 )
                 continue
-            
+
             if not q_text.strip():
                 sources = []
             else:

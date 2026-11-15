@@ -1,10 +1,12 @@
 from transformers import (
     AutoTokenizer,
+    PreTrainedModel,
     PreTrainedTokenizerBase,
     AutoModelForCausalLM,
 )
 from pathlib import Path
 from tqdm import tqdm
+from typing import Any, cast
 import torch
 import os
 
@@ -17,6 +19,8 @@ from .model import (
 
 
 class Generator:
+    """Generate grounded answers from retrieved source snippets."""
+
     def __init__(self, model_name: str = "Qwen/Qwen3-0.6B") -> None:
         """
         Loads tokenizer and Qwen/Qwen3-0.6B model onto available device.
@@ -24,6 +28,12 @@ class Generator:
         .to(self.device):
             The generator uses the gpu with cuda if available
             otherwise the cpu
+
+        Args:
+            model_name: Hugging Face model identifier to load for generation.
+
+        Returns:
+            None.
         """
         self._file_cache: dict[str, str] = {}
 
@@ -35,11 +45,13 @@ class Generator:
 
         # bfloat16 have the scope to reduce the data heavy
         # modern LLMs (including Qwen3) were trained natively in bfloat16
-        self.auto_model = (
-            AutoModelForCausalLM.from_pretrained(
+        model_loader: Any = AutoModelForCausalLM
+        self.auto_model: PreTrainedModel = cast(
+            PreTrainedModel,
+            model_loader.from_pretrained(
                 model_name,
                 dtype=torch.bfloat16,
-            ).to(self.device)
+            ).to(self.device),
         )
 
         # Force PyTorch to use all available CPU cores
@@ -49,7 +61,14 @@ class Generator:
     def extract_snippets(
             self, sources: list[MinimalSource]
     ) -> list[tuple[MinimalSource, str]]:
-        """Extracts context from sources"""
+        """Read the referenced character ranges from source files.
+
+        Args:
+            sources: Source paths and character ranges to extract.
+
+        Returns:
+            Source records paired with their extracted text snippets.
+        """
         extracted: list[tuple[MinimalSource, str]] = []
         for src in sources:
             file_path = src.file_path
@@ -90,6 +109,13 @@ class Generator:
             tokenize: if TRUE return the token(numbers) -> here False
             add_generation_prompt add <|im_start|>assistant
             that say to the model that the prompt is finished
+
+        Args:
+            query: User question to answer.
+            snippets: Retrieved source records paired with their text.
+
+        Returns:
+            A formatted chat prompt ready for tokenization.
         """
         context_block = []
         for i, (src, text) in enumerate(snippets, start=1):
@@ -121,9 +147,13 @@ class Generator:
         ]
 
         # specifications in the docstring
-        prompt = self.auto_tokenizer.apply_chat_template(
-            messages, tokenize=False,
-            add_generation_prompt=True
+        prompt = cast(
+            str,
+            self.auto_tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            ),
         )
 
         # "<think>\n</think>\n":
@@ -163,6 +193,14 @@ class Generator:
                 reply.
             do_sample=False:
                 Uses greedy decoding for deterministic, factual answers.
+
+        Args:
+            query: User question to answer.
+            sources: Retrieved source locations used as answer context.
+            max_new_tokens: Optional maximum number of generated tokens.
+
+        Returns:
+            The generated answer, or an explanatory fallback message.
         """
         if max_new_tokens is None:
             max_new_tokens = 180
@@ -185,7 +223,7 @@ class Generator:
             # do_sample: Always picks the word with the highest probability
             #    IF True: the llm is in creative mode.
             #    it could use random and temperature properties
-            outputs = self.auto_model.generate(
+            outputs = cast(Any, self.auto_model).generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
@@ -200,9 +238,12 @@ class Generator:
         generated_tokens = outputs[0][input_len:]
 
         # skip_special_tokens: skip all technical tag (es: <|im_end|>)
-        answer = self.auto_tokenizer.decode(
-            generated_tokens,
-            skip_special_tokens=True
+        answer = cast(
+            str,
+            self.auto_tokenizer.decode(
+                generated_tokens,
+                skip_special_tokens=True,
+            ),
         )
 
         if "</think>" in answer:
@@ -230,6 +271,14 @@ class Generator:
     ) -> None:
         """
         Generates answers from validated search results and saves them as JSON.
+
+        Args:
+            search_results_data: Validated questions and retrieved sources.
+            input_filename: Filename to use for the generated JSON output.
+            save_directory: Directory where the output file is written.
+
+        Returns:
+            None.
         """
         answers: list[MinimalAnswer] = []
 

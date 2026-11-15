@@ -56,9 +56,18 @@ class Embedder:
                 [batch_size, 384].
         """
 
-        # Apply the mask to each valid token:
-        # Valid words are multiplied by 1 (their values stay exactly the same)
-        # Padding tokens are multiplied by 0 (their values become all zeros)
+        # model_output is a tridimensional Tensor:
+        #     1° dim = batch dimension - 32 fixed
+        #     2° sequence length = depend on the longest chunk text
+        #        example:
+        #        Short text:     [The, cat, sleeps, PAD, PAD]
+        #        Attention Mask: [  1,   1,      1,   0,   0]
+        #        LONGEST text:   [The, cat, sleeps, now, !]
+        #        Attention Mask: [ 1 ,   1,      1,   1, 1]
+        #     3° vector's dimension = 384 fixed
+        # Matrix multiplication produces a score tensor shaped
+        # [number_of_chunks, 1]. Calling .squeeze(-1) removes that final
+        # size‑1 dimension
         token_embeddings = model_output[0]
         input_mask_expanded = (
             attention_mask.unsqueeze(-1)
@@ -80,6 +89,7 @@ class Embedder:
         self,
         texts: list[str],
         batch_size: int = 32,
+        progress_bar: tqdm | None = None
     ) -> torch.Tensor:
         """
         Encode a list of texts into L2-normalized 384-d vectors.
@@ -87,6 +97,7 @@ class Embedder:
         Args:
             texts: List of text strings to embed (chunks or query).
             batch_size: Number of texts per inference batch (default: 32).
+            progress_bar: Optional shared tqdm bar to update as batches finish.
 
         Returns:
             torch.Tensor: Normalized embeddings of shape [len(texts), 384].
@@ -103,9 +114,8 @@ class Embedder:
         all_embeddings: list[torch.Tensor] = []
 
         # take 32(batch_size) chunks a time
-        print(f"Generating embeddings for {len(texts)} chunks...")
-        for i in tqdm(range(0, len(texts), batch_size)):
-            batch_texts = texts[i : i + batch_size]
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
 
             # Tokenize batch:
             # - padding=True: equalizes lengths using PAD tokens
@@ -164,5 +174,8 @@ class Embedder:
 
             # ADD this batch (32, 384) to all_embeddings var
             all_embeddings.append(embeddings.cpu())
+
+            if progress_bar is not None:
+                progress_bar.update(len(batch_texts))
 
         return torch.cat(all_embeddings, dim=0)

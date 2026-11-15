@@ -7,7 +7,6 @@ from pydantic import ValidationError
 import fire
 import json
 
-from rag_against_the_machine import retriever
 from .model import RagDataset, StudentSearchResults
 
 
@@ -16,7 +15,17 @@ class RAGCLI:
 
     @staticmethod
     def _compute_iou(start1: int, end1: int, start2: int, end2: int) -> float:
-        """Calculate the Intersection over Union"""
+        """Calculate the intersection-over-union of two character spans.
+
+        Args:
+            start1: Start offset of the first span.
+            end1: End offset of the first span.
+            start2: Start offset of the second span.
+            end2: End offset of the second span.
+
+        Returns:
+            The ratio of the spans' intersection length to their union length.
+        """
         inter_start = max(start1, start2)
         inter_end = min(end1, end2)
         intersection = max(0, inter_end - inter_start)
@@ -27,6 +36,16 @@ class RAGCLI:
     def _is_source_recalled(
         pred: dict[str, Any], gt_src: dict[str, Any], min_iou: float = 0.05
     ) -> bool:
+        """Check whether a predicted source matches a reference source.
+
+        Args:
+            pred: Predicted source path and character offsets.
+            gt_src: Ground-truth source path and character offsets.
+            min_iou: Minimum span overlap ratio considered a match.
+
+        Returns:
+            Whether both paths match and the spans meet the overlap threshold.
+        """
         # IF are not part of the same file ...
         if pred.get("file_path") != gt_src.get("file_path"):
             return False
@@ -37,7 +56,7 @@ class RAGCLI:
             gt_src.get("last_character_index", 0),
         )
         return iou >= min_iou
-    
+
     def index(
         self,
         max_chunk_size: int = 2000,
@@ -45,7 +64,17 @@ class RAGCLI:
         raw_dir: str = "data/raw/vllm-0.10.1",
         semantic: bool = False,
     ) -> None:
-        """ingest the file and build the BM25 index."""
+        """Ingest the source corpus and build its index.
+
+        Args:
+            max_chunk_size: Maximum characters per indexed chunk.
+            processed_dir: Directory where index artifacts are saved.
+            raw_dir: Directory containing source files to index.
+            semantic: Whether to build semantic embeddings as well.
+
+        Returns:
+            None.
+        """
         if not 0 < max_chunk_size <= 2000:
             print("Error: max_chunk_size must be between 1 and 2000.")
             return
@@ -73,7 +102,17 @@ class RAGCLI:
         processed_dir: str = "data/processed",
         mode: str = "bm25",
     ) -> None:
-        """Search for i top-k snipped for a single question."""
+        """Search one query and print its top source locations.
+
+        Args:
+            query: Question or search text.
+            k: Maximum number of sources to return.
+            processed_dir: Directory containing the saved index.
+            mode: Retrieval mode: ``bm25``, ``semantic``, or ``hybrid``.
+
+        Returns:
+            None. Results or errors are printed to the terminal.
+        """
         if not query or not query.strip():
             print("Error: The query can't be empty")
             return
@@ -118,6 +157,16 @@ class RAGCLI:
             bm25[def] -> retrieve only using the bm25 > require index.pkl
             semantic -> retrieve using the semantics > require vectors.npy
             hybrid -> retrieve mixing both the algorithms
+
+        Args:
+            dataset_path: JSON dataset containing questions to search.
+            k: Maximum number of sources to retrieve per question.
+            save_directory: Directory where search results are written.
+            processed_dir: Directory containing the saved index.
+            mode: Retrieval mode: ``bm25``, ``semantic``, or ``hybrid``.
+
+        Returns:
+            None. Results or errors are reported to the terminal.
         """
         try:
             retriever = Retriever.load(processed_dir, mode=mode)
@@ -140,7 +189,17 @@ class RAGCLI:
         processed_dir: str = "data/processed",
         model_name: str = "Qwen/Qwen3-0.6B",
     ) -> None:
-        """Answer a single query using the retrieved context."""
+        """Generate an answer to one query using retrieved context.
+
+        Args:
+            query: Question to answer.
+            k: Maximum number of retrieved sources used as context.
+            processed_dir: Directory containing the saved index.
+            model_name: Hugging Face identifier of the answer model.
+
+        Returns:
+            None. The generated answer is printed to the terminal.
+        """
         if not query or not query.strip():
             print("Error: The query can't be empty.")
             return
@@ -172,6 +231,14 @@ class RAGCLI:
         """
         Generate answers for a dataset, producing a
         StudentSearchResultsAndAnswer JSON file.
+
+        Args:
+            student_search_results_path: JSON file containing search results.
+            save_directory: Directory where answer results are written.
+            model_name: Hugging Face identifier of the answer model.
+
+        Returns:
+            None. The answer dataset is saved as JSON.
         """
         from .generator import Generator
 
@@ -208,7 +275,16 @@ class RAGCLI:
         dataset_path: str,
         k_values: tuple[int, ...] = (1, 3, 5, 10),
     ) -> None:
-        """Evaluate retrieval Recall@k against ground-truth dataset."""
+        """Evaluate retrieval Recall@k against a ground-truth dataset.
+
+        Args:
+            student_search_results_path: JSON file containing predictions.
+            dataset_path: Ground-truth dataset JSON file.
+            k_values: Recall cutoffs to calculate.
+
+        Returns:
+            None. Evaluation scores or validation errors are printed.
+        """
 
         # any return true if just 1 k in k_values is <= 0
         if (
@@ -249,19 +325,19 @@ class RAGCLI:
             print(f"Error: invalid evaluation data: {e}")
             return
 
-        pred_quest_id: dict = {}
+        pred_quest_id: dict[str, list[dict[str, Any]]] = {}
         for pred_item in pred_data["search_results"]:
             question_id = pred_item["question_id"]
             pred_sources = pred_item.get("retrieved_sources", [])
             pred_quest_id[question_id] = pred_sources
 
         # RECALLS save the points for each k
-        #{                                                                                                           
+        # {
         #    1:  [0.0, 1.0, 0.5, 0.0, ...] Recall@1 for each quests
         #    3:  [0.5, 1.0, 0.5, 1.0, ...] Recall@3 for each quests
         #    5:  [1.0, 1.0, 1.0, 1.0, ...] Recall@5 for each quests
         #    10: [1.0, 1.0, 1.0, 1.0, ...] Recall@10 for each quests
-        #}
+        # }
         recalls: dict[int, list[float]] = {k: [] for k in k_values}
 
         gt_questions = gt_data["rag_questions"]
@@ -276,7 +352,7 @@ class RAGCLI:
 
             for k in k_values:
                 top_k = retrieved[:k]
-                
+
                 # Count the correct sources found
                 found = 0
                 for gt_src in gt_sources:

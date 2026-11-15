@@ -66,9 +66,9 @@ Modern Information Retrieval is divided into two fundamental paradigms:
 │                      Information Retrieval (IR)                        │
 └──────────────────┬──────────────────────────────────┬──────────────────┘
                    │                                  │
-         ┌─────────▼────────┐                ┌────────▼────────┐
+         ┌─────────▼────────┐                ┌────────▼─────────┐
          │ Sparse / Lexical │                │  Dense / Semantic│
-         └─────────┬────────┘                └────────┬────────┘
+         └─────────┬────────┘                └────────┬─────────┘
                    │                                  │
     • Exact keyword matching          • Conceptual / semantic similarity
     • High-dimensional, sparse vectors• Low-dimensional, dense vectors (e.g., 384)
@@ -95,10 +95,10 @@ When a query arrives, retrieval requires looking up only the query's terms in th
 ### 3.1. Standard TF-IDF Formula
 
 ```
-                   f(t, D)            /       N          \
-Score_TFIDF(t, D) = ───────  ×  ln   │ ───────────────── │
-                     |D|              \ |{d ∈ D : t ∈ d} /
-                    └──┬──┘          └────────┬────────┘
+                   f(t, D)            /       N           \
+Score_TFIDF(t, D) = ───────  ×  ln    │ ───────────────── │
+                     |D|              \ |{d ∈ D : t ∈ d}  /
+                   └──┬──┘             └────────┬────────┘
                    Term Freq (TF)       Inverse Doc Freq (IDF)
 ```
 
@@ -202,7 +202,7 @@ $$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}}\right
               N
               ∑  ( mask_i  ×  token_vector_i )
              i=1
-Sentence Vector u =  ────────────────────────────────
+Chunk/Text Vector u = ───────────────────────────────
                                   N
                                   ∑  mask_i
                                  i=1
@@ -211,8 +211,10 @@ Sentence Vector u =  ───────────────────�
 $$\vec{u} = \frac{\sum_{i=1}^N m_i \cdot \vec{t}_i}{\sum_{i=1}^N m_i}$$
 
 * **$\vec{t}_i \in \mathbb{R}^{384}$**: Output embedding for token $i$.
-* **$m_i \in \{0, 1\}$**: Attention mask bit ($1$ for actual words, $0$ for padding tokens).
-* **Result $\vec{u} \in \mathbb{R}^{384}$**: The center-of-mass vector representing the entire sentence without padding noise.
+* **$m_i \in \{0, 1\}$**: Attention mask bit ($1$ for a real token, $0$ for padding).
+* **Result $\vec{u} \in \mathbb{R}^{384}$**: One vector representing the complete input text, usually one chunk, without padding positions affecting its mean.
+
+For a batch of $B$ texts padded to a sequence length $L$, the transformer output has shape $[B, L, 384]$. Mean pooling operates over the token dimension $L$ independently for each text, producing $[B, 384]$: one vector per input chunk, not one vector for the whole batch.
 
 ---
 
@@ -301,6 +303,9 @@ $$\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_{\text{rrf}} + r_m(
 * **$k_{\text{rrf}} = 60$**: Smoothing constant. Prevents a single system from dominating the combined ranking.
 * **Advantage**: Score-free combination. Does not require calibrating BM25 scores $[0, \infty)$ against Cosine scores $[-1, 1]$.
 
+### RRF in This Project
+The hybrid retriever gathers up to `min(max(2 * k, 50), number_of_chunks)` candidates from each ranking, adds their reciprocal-rank contributions, and returns the top `k` combined chunk indices. It uses `k_rrf = 60`.
+
 ---
 
 ## 6. Chunking Strategies for Technical Codebases
@@ -308,18 +313,17 @@ $$\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_{\text{rrf}} + r_m(
 ```
 Raw File
    │
-   ├── If Python (.py) ──> Structural AST / Regex Splitter
+   ├── If Python (.py) ──> Marker-Based Splitter
    │                        • Splits at: 'class ', 'def ', 'async def '
    │                        • Preserves: method signatures & docstrings
    │
-   └── If Markdown (.md) ──> Hierarchical Header Splitter
-                            • Splits at: '# ', '## ', '### '
-                            • Preserves: topic titles with body paragraphs
+   ├── If Markdown (.md) ──> Header-Based Splitter
+   │                        • Uses preferred markers: '# ', '## '
+   └── If Text (.txt) ────> Line-Based Splitter
+                            • Uses newline boundaries
 ```
 
-### The Minimum Chunk Size Threshold
-* **Problem:** Splitting strictly on headers produces tiny isolated chunks (e.g. 15 characters: `# Features\n`).
-* **Solution:** Merge slices under 200 characters forward into the subsequent block.
+All three strategies also split content to respect the configured maximum chunk size, which defaults to 2,000 characters. Preferred markers start a new chunk only after the current chunk has reached 1,000 characters; this avoids splitting too early at every heading or code declaration. Oversized individual lines are split into smaller pieces.
 
 ---
 

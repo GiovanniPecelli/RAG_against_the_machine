@@ -3,7 +3,16 @@ import re
 
 class Tokenizer:
     """Simple tokenizer that normalizes text and splits code identifiers."""
+
     def __init__(self, min_length: int = 1):
+        """Configure the minimum token length.
+
+        Args:
+            min_length: Shortest token length retained in the output.
+
+        Returns:
+            None.
+        """
         self.min_length = min_length
 
         self.stop_words = {
@@ -12,6 +21,15 @@ class Tokenizer:
         }
 
     def tokenize(self, text: str) -> list[str]:
+        """Normalize text and return searchable word and identifier tokens.
+
+        Args:
+            text: Text to tokenize.
+
+        Returns:
+            Lowercase tokens, including parts of snake_case and CamelCase
+            names.
+        """
         if not text:
             return []
 
@@ -45,7 +63,10 @@ class Tokenizer:
                 sub_tokens = re.findall(r"\w+", normalized.lower())
 
                 for sub in sub_tokens:
-                    if len(sub) >= self.min_length and sub not in self.stop_words:
+                    if (
+                        len(sub) >= self.min_length
+                        and sub not in self.stop_words
+                    ):
                         result_tokens.append(sub)
 
         return result_tokens
